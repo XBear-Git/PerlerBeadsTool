@@ -1,5 +1,9 @@
 import type { jsPDF as JsPdfDocument } from "jspdf";
 
+import {
+  buildPatternFilename,
+  DEFAULT_PATTERN_NAME,
+} from "@/lib/filename";
 import { computeStats } from "@/lib/stats";
 import type { BeadGrid } from "@/types";
 
@@ -32,8 +36,9 @@ const BOM_ROW_HEIGHT = 7;
 
 export interface PdfExportOptions {
   brandName: string;
+  /** 用户自定义的图纸名称，用于 PDF 标题与文件名 */
+  patternName: string;
   showCodes?: boolean;
-  title?: string;
 }
 
 /** 一页图纸覆盖的数据范围（索引均从 0 开始） */
@@ -92,9 +97,83 @@ export function createPdfTiles(cols: number, rows: number): PdfTile[] {
   return tiles;
 }
 
-function formatFilename(brand: string, cols: number, rows: number): string {
-  const safeBrand = brand.toLowerCase().replace(/[^a-z0-9-]+/g, "-");
-  return `beads-${safeBrand}-${cols}x${rows}.pdf`;
+const TITLE_MAX_WIDTH = PDF_PAGE_WIDTH - MARGIN * 2;
+const TITLE_MAX_HEIGHT = 6;
+
+/**
+ * 将中文/混合标题栅格化为高分辨率 PNG。
+ * jsPDF 内置 Helvetica 不含中文字形，直接写文字会乱码；
+ * 用 Canvas 以系统字体绘制后再嵌入，可支持任意中文图纸名。
+ */
+function createTitleImage(text: string): {
+  dataUrl: string;
+  width: number;
+  height: number;
+} {
+  const fontSize = 64;
+  const paddingX = 8;
+
+  const canvas = document.createElement("canvas");
+  const measureContext = canvas.getContext("2d");
+  if (!measureContext) {
+    throw new Error("当前浏览器不支持 Canvas 2D，无法渲染中文 PDF 标题。");
+  }
+
+  const font = `700 ${fontSize}px "Microsoft YaHei", "PingFang SC", "Noto Sans SC", "Segoe UI", sans-serif`;
+  measureContext.font = font;
+  const metrics = measureContext.measureText(text);
+
+  canvas.width = Math.max(1, Math.ceil(metrics.width + paddingX * 2));
+  canvas.height = Math.ceil(fontSize * 1.4);
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("当前浏览器不支持 Canvas 2D，无法渲染中文 PDF 标题。");
+  }
+
+  context.font = font;
+  context.textBaseline = "middle";
+  context.fillStyle = "#111827";
+  context.fillText(text, paddingX, canvas.height / 2);
+
+  return {
+    dataUrl: canvas.toDataURL("image/png"),
+    width: canvas.width,
+    height: canvas.height,
+  };
+}
+
+/**
+ * 绘制页标题：
+ * - 纯 ASCII 用 jsPDF 矢量文字，保持清晰且体积小；
+ * - 含中文时转为图片嵌入，避免 Helvetica 缺字。
+ */
+function drawTitle(pdf: JsPdfDocument, title: string): void {
+  if (/^[\x20-\x7E]+$/.test(title)) {
+    pdf.setFont("helvetica", "bold");
+    let fontSize = 13;
+    pdf.setFontSize(fontSize);
+
+    while (pdf.getTextWidth(title) > TITLE_MAX_WIDTH && fontSize > 8) {
+      fontSize -= 0.5;
+      pdf.setFontSize(fontSize);
+    }
+
+    pdf.setTextColor(17, 24, 39);
+    pdf.text(title, MARGIN, MARGIN + 5);
+    return;
+  }
+
+  const image = createTitleImage(title);
+  let height = TITLE_MAX_HEIGHT;
+  let width = (image.width / image.height) * height;
+
+  if (width > TITLE_MAX_WIDTH) {
+    width = TITLE_MAX_WIDTH;
+    height = (image.height / image.width) * width;
+  }
+
+  pdf.addImage(image.dataUrl, "PNG", MARGIN, MARGIN - 0.8, width, height);
 }
 
 function readableTextColor(cell: BeadGrid[number][number]): [number, number, number] {
@@ -121,12 +200,9 @@ function drawPatternPage(
   gridX: number,
   gridY: number,
 ): void {
-  const title = options.title ?? "Perler Beads Pattern";
+  const patternName = options.patternName.trim() || DEFAULT_PATTERN_NAME;
 
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(13);
-  pdf.setTextColor(17, 24, 39);
-  pdf.text(`${title} - Part ${tile.index} / ${tileCount}`, MARGIN, MARGIN + 5);
+  drawTitle(pdf, `${patternName} - Part ${tile.index} / ${tileCount}`);
 
   const firstColumn = toColumnLabel(tile.colStart);
   const lastColumn = toColumnLabel(tile.colStart + tile.cols - 1);
@@ -351,7 +427,7 @@ export async function exportGridToPdf(
   });
 
   pdf.setProperties({
-    title: options.title ?? "Perler Beads Pattern",
+    title: options.patternName.trim() || DEFAULT_PATTERN_NAME,
     creator: "Perler Beads Tool",
   });
 
@@ -417,5 +493,13 @@ export async function exportGridToPdf(
 
   drawFooters(pdf);
 
-  pdf.save(formatFilename(options.brandName, cols, rows));
+  pdf.save(
+    buildPatternFilename({
+      patternName: options.patternName,
+      brandName: options.brandName,
+      cols,
+      rows,
+      extension: "pdf",
+    }),
+  );
 }

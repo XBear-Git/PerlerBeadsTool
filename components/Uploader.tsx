@@ -50,7 +50,7 @@ export function Uploader({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>1. 上传图片</CardTitle>
+        <CardTitle>上传图片</CardTitle>
         <CardDescription>
           支持 PNG / JPG / WebP，单张不超过 {MAX_FILE_BYTES / 1024 / 1024} MB。
         </CardDescription>

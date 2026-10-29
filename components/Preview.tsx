@@ -1,8 +1,15 @@
 "use client";
 
 import { useEffect, type MouseEvent, type RefObject } from "react";
-import { Grid3X3Icon, LoaderCircleIcon, PaintbrushIcon } from "lucide-react";
+import {
+  EraserIcon,
+  Grid3X3Icon,
+  LoaderCircleIcon,
+  PaintbrushIcon,
+  Undo2Icon,
+} from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -27,9 +34,15 @@ export interface PreviewProps {
   showCodes: boolean;
   brushColor: BeadColor | null;
   isProcessing: boolean;
+  isDirty: boolean;
+  undoCount: number;
+  canUndo: boolean;
+  canClearEdits: boolean;
   canvasRef: RefObject<HTMLCanvasElement | null>;
   onSelectBrush: (color: BeadColor | null) => void;
   onPaint: (row: number, col: number) => void;
+  onUndo: () => void;
+  onClearEdits: () => void;
 }
 
 /** 图纸预览：Canvas 渲染 + 手动画笔取色 */
@@ -39,9 +52,15 @@ export function Preview({
   showCodes,
   brushColor,
   isProcessing,
+  isDirty,
+  undoCount,
+  canUndo,
+  canClearEdits,
   canvasRef,
   onSelectBrush,
   onPaint,
+  onUndo,
+  onClearEdits,
 }: PreviewProps) {
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -80,7 +99,7 @@ export function Preview({
   return (
     <Card className="min-w-0">
       <CardHeader>
-        <CardTitle>3. 图纸预览</CardTitle>
+        <CardTitle>图纸预览</CardTitle>
         <CardDescription>
           {grid
             ? `${grid[0]?.length ?? 0} × ${grid.length} 格 · ${palette.name}`
@@ -143,6 +162,38 @@ export function Preview({
                   取消画笔
                 </Button>
               ) : null}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                disabled={!canUndo}
+                onClick={onUndo}
+                title="撤销上一步手动改色"
+              >
+                <Undo2Icon data-icon="inline-start" />
+                撤销{undoCount > 0 ? ` (${undoCount})` : ""}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                disabled={!canClearEdits}
+                onClick={onClearEdits}
+                title="恢复到自动生成的原始图纸"
+              >
+                <EraserIcon data-icon="inline-start" />
+                清空修改
+              </Button>
+              {isDirty ? (
+                <Badge variant="secondary">已手动修改</Badge>
+              ) : (
+                <span className="text-xs text-muted-foreground">
+                  最多可撤销 10 步
+                </span>
+              )}
             </div>
 
             <div className="flex max-h-32 flex-wrap gap-1.5 overflow-y-auto rounded-lg border p-2">

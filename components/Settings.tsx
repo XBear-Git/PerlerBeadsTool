@@ -45,7 +45,7 @@ export function Settings({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>2. 图纸参数</CardTitle>
+        <CardTitle>图纸参数</CardTitle>
         <CardDescription>
           品牌切换与网格调整会实时重算；抖动会增加用色数量。
         </CardDescription>

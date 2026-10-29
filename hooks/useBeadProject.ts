@@ -18,6 +18,7 @@ import {
 } from "@/lib/pixelate";
 import { computeStats } from "@/lib/stats";
 import type {
+  BeadCell,
   BeadColor,
   BeadGrid,
   BeadPalette,
@@ -33,6 +34,37 @@ export const DEFAULT_SETTINGS: ProjectSettings = {
   showCodes: true,
 };
 
+/** 手动改色最多保留的撤销步数 */
+export const MAX_EDIT_HISTORY = 10;
+
+interface ManualEdit {
+  row: number;
+  col: number;
+  /** 改色前的格子，用于撤销 */
+  before: BeadCell;
+}
+
+function gridsEqual(a: BeadGrid, b: BeadGrid | null): boolean {
+  if (!b || a.length !== b.length) return false;
+
+  for (let row = 0; row < a.length; row += 1) {
+    if (a[row].length !== b[row].length) return false;
+
+    for (let col = 0; col < a[row].length; col += 1) {
+      const left = a[row][col];
+      const right = b[row][col];
+      if (
+        left.color.code !== right.color.code ||
+        left.color.hex !== right.color.hex
+      ) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 export interface UseBeadProjectResult {
   settings: ProjectSettings;
   palette: BeadPalette;
@@ -45,11 +77,19 @@ export interface UseBeadProjectResult {
   error: string | null;
   isProcessing: boolean;
   hasImage: boolean;
+  /** 是否有尚未清除的手动修改 */
+  isDirty: boolean;
+  /** 当前可撤销步数，最多 MAX_EDIT_HISTORY */
+  undoCount: number;
+  canUndo: boolean;
+  canClearEdits: boolean;
   updateSettings: (patch: Partial<ProjectSettings>) => void;
   loadFile: (file: File) => Promise<void>;
   reset: () => void;
   selectBrush: (color: BeadColor | null) => void;
   paintCell: (row: number, col: number) => void;
+  undo: () => void;
+  clearEdits: () => void;
 }
 
 /**
@@ -64,6 +104,10 @@ export function useBeadProject(): UseBeadProjectResult {
   const [brushColor, setBrushColor] = useState<BeadColor | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  /** 自动生成的原始图纸，用于「清空修改」 */
+  const [baseGrid, setBaseGrid] = useState<BeadGrid | null>(null);
+  const [editHistory, setEditHistory] = useState<ManualEdit[]>([]);
+  const [isDirty, setIsDirty] = useState(false);
 
   const processTaskRef = useRef(0);
   const loadTaskRef = useRef(0);
@@ -107,6 +151,9 @@ export function useBeadProject(): UseBeadProjectResult {
         if (processTaskRef.current !== taskId) return;
 
         setGrid(nextGrid);
+        setBaseGrid(nextGrid);
+        setEditHistory([]);
+        setIsDirty(false);
         setBrushColor(null);
         setError(null);
       } catch (cause) {
@@ -158,6 +205,9 @@ export function useBeadProject(): UseBeadProjectResult {
     setSource(null);
     setSourceName(null);
     setGrid(null);
+    setBaseGrid(null);
+    setEditHistory([]);
+    setIsDirty(false);
     setBrushColor(null);
     setError(null);
     setIsProcessing(false);
@@ -169,21 +219,44 @@ export function useBeadProject(): UseBeadProjectResult {
 
   const paintCell = useCallback(
     (row: number, col: number) => {
-      if (!brushColor) return;
+      if (!brushColor || !grid) return;
 
-      setGrid((previous) => {
-        const cell = previous?.[row]?.[col];
-        if (!previous || !cell || cell.color.code === brushColor.code) {
-          return previous;
-        }
+      const cell = grid[row]?.[col];
+      if (!cell || cell.color.code === brushColor.code) return;
 
-        const next = previous.map((line) => [...line]);
-        next[row][col] = { color: brushColor, rgb: hexToRgb(brushColor.hex) };
-        return next;
-      });
+      const next = grid.map((line) => [...line]);
+      next[row][col] = { color: brushColor, rgb: hexToRgb(brushColor.hex) };
+
+      setGrid(next);
+      setEditHistory((previous) => [
+        ...previous.slice(-(MAX_EDIT_HISTORY - 1)),
+        { row, col, before: cell },
+      ]);
+      setIsDirty(true);
     },
-    [brushColor],
+    [brushColor, grid],
   );
+
+  const undo = useCallback(() => {
+    const last = editHistory[editHistory.length - 1];
+    if (!last || !grid) return;
+
+    const next = grid.map((line) => [...line]);
+    next[last.row][last.col] = last.before;
+
+    setGrid(next);
+    setEditHistory((previous) => previous.slice(0, -1));
+    setIsDirty(!gridsEqual(next, baseGrid));
+  }, [baseGrid, editHistory, grid]);
+
+  const clearEdits = useCallback(() => {
+    if (!baseGrid) return;
+
+    // 恢复到自动生成结果；复制行数组，避免后续绘制影响 baseGrid
+    setGrid(baseGrid.map((line) => [...line]));
+    setEditHistory([]);
+    setIsDirty(false);
+  }, [baseGrid]);
 
   return {
     settings,
@@ -197,10 +270,16 @@ export function useBeadProject(): UseBeadProjectResult {
     error,
     isProcessing,
     hasImage: source !== null,
+    isDirty,
+    undoCount: editHistory.length,
+    canUndo: editHistory.length > 0,
+    canClearEdits: isDirty,
     updateSettings,
     loadFile,
     reset,
     selectBrush: setBrushColor,
     paintCell,
+    undo,
+    clearEdits,
   };
 }

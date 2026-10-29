@@ -13,6 +13,10 @@ import { Badge } from "@/components/ui/badge";
 import { DEFAULT_SETTINGS, useBeadProject } from "@/hooks/useBeadProject";
 import { exportGridToPdf } from "@/lib/exportPdf";
 import {
+  buildPatternFilename,
+  DEFAULT_PATTERN_NAME,
+} from "@/lib/filename";
+import {
   canvasToPngBlob,
   downloadBlob,
   renderPattern,
@@ -23,6 +27,7 @@ export default function HomePage() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [exporting, setExporting] = useState<ExportFormat | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [patternName, setPatternName] = useState(DEFAULT_PATTERN_NAME);
 
   const { grid, palette, settings, stats } = project;
   const cols = grid?.[0]?.length ?? 0;
@@ -44,7 +49,16 @@ export default function HomePage() {
         pixelRatio: 1,
       });
       const blob = await canvasToPngBlob(exportCanvas);
-      downloadBlob(blob, `beads-${palette.id}-${cols}x${rows}.png`);
+      downloadBlob(
+        blob,
+        buildPatternFilename({
+          patternName,
+          brandName: palette.name,
+          cols,
+          rows,
+          extension: "png",
+        }),
+      );
     } catch (cause) {
       setExportError(
         cause instanceof Error ? cause.message : "导出 PNG 失败，请重试。",
@@ -62,6 +76,7 @@ export default function HomePage() {
     try {
       await exportGridToPdf(grid, {
         brandName: palette.name,
+        patternName,
         showCodes: settings.showCodes,
       });
     } catch (cause) {
@@ -124,9 +139,15 @@ export default function HomePage() {
               showCodes={settings.showCodes}
               brushColor={project.brushColor}
               isProcessing={project.isProcessing}
+              isDirty={project.isDirty}
+              undoCount={project.undoCount}
+              canUndo={project.canUndo}
+              canClearEdits={project.canClearEdits}
               canvasRef={canvasRef}
               onSelectBrush={project.selectBrush}
               onPaint={project.paintCell}
+              onUndo={project.undo}
+              onClearEdits={project.clearEdits}
             />
 
             <BomList stats={stats} paletteName={palette.name} />
@@ -147,6 +168,11 @@ export default function HomePage() {
               exporting={exporting}
               totalBeads={stats?.total ?? 0}
               uniqueColors={stats?.uniqueColors ?? 0}
+              brandName={palette.name}
+              cols={cols}
+              rows={rows}
+              patternName={patternName}
+              onPatternNameChange={setPatternName}
               onExportPng={() => {
                 void handleExportPng();
               }}
