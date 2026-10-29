@@ -1,15 +1,34 @@
+import type { jsPDF as JsPdfDocument } from "jspdf";
+
 import { computeStats } from "@/lib/stats";
 import type { BeadGrid } from "@/types";
 
 /**
- * PDF 导出封装。
+ * PDF 导出封装（A4 自动分页）。
  *
- * 说明：
- * - 使用 jsPDF 的矢量绘图，网格和色块都是矢量，放大不糊；
- * - jsPDF 内置字体不含中文，因此 PDF 内文案与色号统一使用 ASCII，
- *   色名留在网页端展示；若后续需要中文，可在 public/fonts 放 TTF 并注册；
- * - 大图多页排版属于进阶功能，这里先保证「整图缩放 + 材料清单」可用。
+ * 版式约定：
+ * - A4 纵向 210 × 297 mm，每页最多 32 × 32 格；
+ * - 每页顶部标出该页覆盖的列范围（A、B…AA）与行范围（1、2…）；
+ * - 图纸页按「先左右、后上下」拆分，页脚统一标注 Page x / y；
+ * - 材料清单固定在所有图纸页之后，内容过多时自动续页。
+ *
+ * 说明：jsPDF 内置字体不含中文，PDF 中的标题、坐标、色号与色名均使用 ASCII；
+ * 网页端仍展示完整中文界面。若需中文 PDF，可在 public/fonts 放 TTF 后注册。
  */
+
+export const PDF_PAGE_WIDTH = 210;
+export const PDF_PAGE_HEIGHT = 297;
+
+/** 每页固定格数（横向 / 纵向） */
+export const PDF_CELLS_PER_PAGE_X = 32;
+export const PDF_CELLS_PER_PAGE_Y = 32;
+
+const MARGIN = 8;
+const HEADER_HEIGHT = 14;
+const FOOTER_HEIGHT = 8;
+const ROW_LABEL_WIDTH = 7;
+const COL_LABEL_HEIGHT = 5;
+const BOM_ROW_HEIGHT = 7;
 
 export interface PdfExportOptions {
   brandName: string;
@@ -17,15 +36,297 @@ export interface PdfExportOptions {
   title?: string;
 }
 
-const PAGE_WIDTH = 210;
-const PAGE_HEIGHT = 297;
-const MARGIN = 8;
-const HEADER_HEIGHT = 10;
-const FOOTER_HEIGHT = 8;
+/** 一页图纸覆盖的数据范围（索引均从 0 开始） */
+export interface PdfTile {
+  /** 图纸页序号，从 1 开始 */
+  index: number;
+  colStart: number;
+  rowStart: number;
+  cols: number;
+  rows: number;
+}
+
+/** 0 → A，25 → Z，26 → AA，701 → ZZ，702 → AAA */
+export function toColumnLabel(index: number): string {
+  if (!Number.isInteger(index) || index < 0) {
+    throw new Error("列索引必须是非负整数");
+  }
+
+  let value = index + 1;
+  let label = "";
+
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    label = String.fromCharCode(65 + remainder) + label;
+    value = Math.floor((value - 1) / 26);
+  }
+
+  return label;
+}
+
+/** 把整张图纸按 32×32 拆成 PDF 页 */
+export function createPdfTiles(cols: number, rows: number): PdfTile[] {
+  if (
+    !Number.isInteger(cols) ||
+    !Number.isInteger(rows) ||
+    cols <= 0 ||
+    rows <= 0
+  ) {
+    throw new Error("图纸行列数必须为正整数");
+  }
+
+  const tiles: PdfTile[] = [];
+
+  for (let rowStart = 0; rowStart < rows; rowStart += PDF_CELLS_PER_PAGE_Y) {
+    for (let colStart = 0; colStart < cols; colStart += PDF_CELLS_PER_PAGE_X) {
+      tiles.push({
+        index: tiles.length + 1,
+        colStart,
+        rowStart,
+        cols: Math.min(PDF_CELLS_PER_PAGE_X, cols - colStart),
+        rows: Math.min(PDF_CELLS_PER_PAGE_Y, rows - rowStart),
+      });
+    }
+  }
+
+  return tiles;
+}
 
 function formatFilename(brand: string, cols: number, rows: number): string {
   const safeBrand = brand.toLowerCase().replace(/[^a-z0-9-]+/g, "-");
   return `beads-${safeBrand}-${cols}x${rows}.pdf`;
+}
+
+function readableTextColor(cell: BeadGrid[number][number]): [number, number, number] {
+  const [r, g, b] = cell.rgb;
+  return 0.299 * r + 0.587 * g + 0.114 * b > 155
+    ? [31, 41, 55]
+    : [255, 255, 255];
+}
+
+/**
+ * 绘制一页图纸（含标题、列/行坐标、网格与色号）。
+ * cellSize 在所有页保持一致，保证跨页打印后格子等大。
+ */
+function drawPatternPage(
+  pdf: JsPdfDocument,
+  grid: BeadGrid,
+  tile: PdfTile,
+  tileCount: number,
+  cols: number,
+  rows: number,
+  totalBeads: number,
+  options: PdfExportOptions,
+  cellSize: number,
+  gridX: number,
+  gridY: number,
+): void {
+  const title = options.title ?? "Perler Beads Pattern";
+
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(13);
+  pdf.setTextColor(17, 24, 39);
+  pdf.text(`${title} - Part ${tile.index} / ${tileCount}`, MARGIN, MARGIN + 5);
+
+  const firstColumn = toColumnLabel(tile.colStart);
+  const lastColumn = toColumnLabel(tile.colStart + tile.cols - 1);
+  const firstRow = tile.rowStart + 1;
+  const lastRow = tile.rowStart + tile.rows;
+
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(7.5);
+  pdf.setTextColor(90, 100, 115);
+  pdf.text(
+    `${options.brandName} | ${cols} x ${rows} cells | columns ${firstColumn}-${lastColumn} | rows ${firstRow}-${lastRow} | ${totalBeads} beads`,
+    MARGIN,
+    MARGIN + 10,
+  );
+
+  // 1. 填色
+  for (let localRow = 0; localRow < tile.rows; localRow += 1) {
+    for (let localCol = 0; localCol < tile.cols; localCol += 1) {
+      const cell = grid[tile.rowStart + localRow][tile.colStart + localCol];
+      pdf.setFillColor(cell.rgb[0], cell.rgb[1], cell.rgb[2]);
+      pdf.rect(
+        gridX + localCol * cellSize,
+        gridY + localRow * cellSize,
+        cellSize,
+        cellSize,
+        "F",
+      );
+    }
+  }
+
+  // 2. 网格线
+  pdf.setDrawColor(80, 90, 105);
+  pdf.setLineWidth(0.08);
+  for (let localCol = 0; localCol <= tile.cols; localCol += 1) {
+    const x = gridX + localCol * cellSize;
+    pdf.line(x, gridY, x, gridY + tile.rows * cellSize);
+  }
+  for (let localRow = 0; localRow <= tile.rows; localRow += 1) {
+    const y = gridY + localRow * cellSize;
+    pdf.line(gridX, y, gridX + tile.cols * cellSize, y);
+  }
+
+  pdf.setDrawColor(31, 41, 55);
+  pdf.setLineWidth(0.35);
+  pdf.rect(
+    gridX,
+    gridY,
+    tile.cols * cellSize,
+    tile.rows * cellSize,
+    "S",
+  );
+
+  // 3. 格内色号
+  if ((options.showCodes ?? true) && cellSize >= 3.2) {
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(Math.max(3.2, cellSize * 0.95));
+
+    for (let localRow = 0; localRow < tile.rows; localRow += 1) {
+      for (let localCol = 0; localCol < tile.cols; localCol += 1) {
+        const cell = grid[tile.rowStart + localRow][tile.colStart + localCol];
+        const [r, g, b] = readableTextColor(cell);
+        pdf.setTextColor(r, g, b);
+        pdf.text(
+          cell.color.code,
+          gridX + localCol * cellSize + cellSize / 2,
+          gridY + localRow * cellSize + cellSize * 0.8,
+          { align: "center" },
+        );
+      }
+    }
+  }
+
+  // 4. 行列坐标（全局索引，便于跨页定位）
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(5.5);
+  pdf.setTextColor(71, 85, 105);
+
+  for (let localCol = 0; localCol < tile.cols; localCol += 1) {
+    pdf.text(
+      toColumnLabel(tile.colStart + localCol),
+      gridX + (localCol + 0.5) * cellSize,
+      gridY - 1.8,
+      { align: "center" },
+    );
+  }
+
+  for (let localRow = 0; localRow < tile.rows; localRow += 1) {
+    pdf.text(
+      String(tile.rowStart + localRow + 1),
+      gridX - 1.5,
+      gridY + (localRow + 0.5) * cellSize + 0.8,
+      { align: "right" },
+    );
+  }
+}
+
+/** 绘制一页材料清单 */
+function drawBomPage(
+  pdf: JsPdfDocument,
+  items: ReturnType<typeof computeStats>["items"],
+  pageIndex: number,
+  pageCount: number,
+  brandName: string,
+  totalBeads: number,
+  uniqueColors: number,
+  startIndex: number,
+  endIndex: number,
+): void {
+  const title = pageIndex === 0 ? "Bead list" : "Bead list (continued)";
+
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(14);
+  pdf.setTextColor(17, 24, 39);
+  pdf.text(title, MARGIN, MARGIN + 5);
+
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(8);
+  pdf.setTextColor(90, 100, 115);
+  pdf.text(
+    pageIndex === 0
+      ? `${brandName} | ${uniqueColors} colors | ${totalBeads} beads total`
+      : `${brandName} | page ${pageIndex + 1} / ${pageCount}`,
+    MARGIN,
+    MARGIN + 10,
+  );
+
+  // 表头
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(6.5);
+  pdf.setTextColor(120, 128, 140);
+  pdf.text("Code", MARGIN + 6, MARGIN + 16);
+  pdf.text("Name", MARGIN + 24, MARGIN + 16);
+  pdf.text("Hex", MARGIN + 112, MARGIN + 16);
+  pdf.text("Qty", PDF_PAGE_WIDTH - MARGIN, MARGIN + 16, { align: "right" });
+
+  let cursorY = MARGIN + 21;
+
+  for (let index = startIndex; index < endIndex; index += 1) {
+    const item = items[index];
+
+    // 色块
+    pdf.setFillColor(item.color.hex);
+    pdf.setDrawColor(180, 185, 195);
+    pdf.setLineWidth(0.15);
+    pdf.rect(MARGIN, cursorY - 3.4, 4.4, 4.4, "FD");
+
+    // 色号
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(8);
+    pdf.setTextColor(31, 41, 55);
+    pdf.text(item.color.code, MARGIN + 7, cursorY);
+
+    // 色名
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(7.5);
+    pdf.setTextColor(71, 85, 105);
+    pdf.text(item.color.name, MARGIN + 24, cursorY);
+
+    // hex
+    pdf.setFont("courier", "normal");
+    pdf.setFontSize(7);
+    pdf.setTextColor(120, 128, 140);
+    pdf.text(item.color.hex, MARGIN + 112, cursorY);
+
+    // 数量与占比
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(7.5);
+    pdf.setTextColor(31, 41, 55);
+    pdf.text(
+      `${item.count}  (${(item.ratio * 100).toFixed(1)}%)`,
+      PDF_PAGE_WIDTH - MARGIN,
+      cursorY,
+      { align: "right" },
+    );
+
+    cursorY += BOM_ROW_HEIGHT;
+  }
+}
+
+/** 所有页面完成后统一写页脚，确保 Page x / y 中的 y 是最终总页数 */
+function drawFooters(pdf: JsPdfDocument): void {
+  const pageCount = pdf.getNumberOfPages();
+
+  for (let page = 1; page <= pageCount; page += 1) {
+    pdf.setPage(page);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(7);
+    pdf.setTextColor(140, 148, 160);
+    pdf.text(
+      "Generated with Perler Beads Tool",
+      MARGIN,
+      PDF_PAGE_HEIGHT - MARGIN,
+    );
+    pdf.text(
+      `Page ${page} / ${pageCount}`,
+      PDF_PAGE_WIDTH - MARGIN,
+      PDF_PAGE_HEIGHT - MARGIN,
+      { align: "right" },
+    );
+  }
 }
 
 export async function exportGridToPdf(
@@ -39,168 +340,82 @@ export async function exportGridToPdf(
     throw new Error("图纸为空，无法导出 PDF。");
   }
 
-  const { jsPDF } = await import("jspdf");
-  const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-
-  const title = options.title ?? "Perler Beads Pattern";
+  const tiles = createPdfTiles(cols, rows);
   const stats = computeStats(grid);
 
-  const contentWidth = PAGE_WIDTH - MARGIN * 2;
-  const contentHeight =
-    PAGE_HEIGHT - MARGIN * 2 - HEADER_HEIGHT - FOOTER_HEIGHT;
-  const cellSize = Math.min(contentWidth / cols, contentHeight / rows);
-  const gridWidth = cellSize * cols;
-  const gridHeight = cellSize * rows;
-  const startX = MARGIN + (contentWidth - gridWidth) / 2;
-  const startY = MARGIN + HEADER_HEIGHT;
+  const { jsPDF } = await import("jspdf");
+  const pdf = new jsPDF({
+    orientation: "portrait",
+    unit: "mm",
+    format: "a4",
+  });
 
-  pdf.setProperties({ title, creator: "Perler Beads Tool" });
+  pdf.setProperties({
+    title: options.title ?? "Perler Beads Pattern",
+    creator: "Perler Beads Tool",
+  });
 
-  // ---------- 图纸页 ----------
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(14);
-  pdf.setTextColor(17, 24, 39);
-  pdf.text(title, MARGIN, MARGIN + 4.5);
+  // 统一格子尺寸：以 32 格宽为基准，并保证纵向不超出页脚
+  const availableTop = MARGIN + HEADER_HEIGHT + COL_LABEL_HEIGHT;
+  const availableBottom = PDF_PAGE_HEIGHT - MARGIN - FOOTER_HEIGHT;
+  const contentWidth = PDF_PAGE_WIDTH - MARGIN * 2 - ROW_LABEL_WIDTH;
+  const contentHeight = availableBottom - availableTop;
 
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(8);
-  pdf.setTextColor(90, 100, 115);
-  pdf.text(
-    `${options.brandName} | ${cols} x ${rows} | ${stats.total} beads | ${stats.uniqueColors} colors`,
-    MARGIN,
-    MARGIN + 8.5,
+  const cellSize = Math.min(
+    contentWidth / PDF_CELLS_PER_PAGE_X,
+    contentHeight / PDF_CELLS_PER_PAGE_Y,
   );
 
-  for (let y = 0; y < rows; y += 1) {
-    for (let x = 0; x < cols; x += 1) {
-      const cell = grid[y][x];
-      pdf.setFillColor(cell.rgb[0], cell.rgb[1], cell.rgb[2]);
-      pdf.rect(
-        startX + x * cellSize,
-        startY + y * cellSize,
-        cellSize,
-        cellSize,
-        "F",
-      );
-    }
-  }
+  const gridX = MARGIN + ROW_LABEL_WIDTH;
+  const gridY =
+    availableTop +
+    Math.max(0, (contentHeight - cellSize * PDF_CELLS_PER_PAGE_Y) / 2);
 
-  // 网格线
-  pdf.setDrawColor(80, 90, 105);
-  pdf.setLineWidth(0.08);
-  for (let x = 0; x <= cols; x += 1) {
-    pdf.line(
-      startX + x * cellSize,
-      startY,
-      startX + x * cellSize,
-      startY + gridHeight,
+  tiles.forEach((tile, index) => {
+    if (index > 0) pdf.addPage();
+    drawPatternPage(
+      pdf,
+      grid,
+      tile,
+      tiles.length,
+      cols,
+      rows,
+      stats.total,
+      options,
+      cellSize,
+      gridX,
+      gridY,
     );
-  }
-  for (let y = 0; y <= rows; y += 1) {
-    pdf.line(
-      startX,
-      startY + y * cellSize,
-      startX + gridWidth,
-      startY + y * cellSize,
-    );
-  }
+  });
 
-  // 色号：格子足够大时才绘制
-  if ((options.showCodes ?? true) && cellSize >= 3.2) {
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(Math.max(3, cellSize * 0.9));
-
-    for (let y = 0; y < rows; y += 1) {
-      for (let x = 0; x < cols; x += 1) {
-        const cell = grid[y][x];
-        const [r, g, b] = cell.rgb;
-        const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-        if (luminance > 155) {
-          pdf.setTextColor(31, 41, 55);
-        } else {
-          pdf.setTextColor(255, 255, 255);
-        }
-        pdf.text(
-          cell.color.code,
-          startX + x * cellSize + cellSize / 2,
-          startY + y * cellSize + cellSize / 2 + cellSize * 0.28,
-          { align: "center" },
-        );
-      }
-    }
-  }
-
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(7);
-  pdf.setTextColor(120, 128, 140);
-  pdf.text(
-    "Generated with Perler Beads Tool - 1:1 color reference only",
-    MARGIN,
-    PAGE_HEIGHT - MARGIN,
+  // ---------- 材料清单（最后一页起） ----------
+  const bomTop = MARGIN + 21;
+  const bomBottom = PDF_PAGE_HEIGHT - MARGIN - FOOTER_HEIGHT;
+  const bomRowsPerPage = Math.max(
+    1,
+    Math.floor((bomBottom - bomTop) / BOM_ROW_HEIGHT),
+  );
+  const bomPageCount = Math.max(
+    1,
+    Math.ceil(stats.items.length / bomRowsPerPage),
   );
 
-  // ---------- 材料清单页 ----------
-  pdf.addPage();
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(14);
-  pdf.setTextColor(17, 24, 39);
-  pdf.text("Bead list", MARGIN, MARGIN + 5);
-
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(8);
-  pdf.setTextColor(90, 100, 115);
-  pdf.text(
-    `${stats.uniqueColors} colors | ${stats.total} beads total`,
-    MARGIN,
-    MARGIN + 10,
-  );
-
-  let cursorY = MARGIN + 20;
-  const rowHeight = 7;
-  const swatch = 4.5;
-
-  for (let i = 0; i < stats.items.length; i += 1) {
-    if (cursorY > PAGE_HEIGHT - MARGIN - rowHeight) {
-      pdf.addPage();
-      cursorY = MARGIN + 10;
-    }
-
-    const item = stats.items[i];
-    pdf.setFillColor(item.color.hex);
-    pdf.setDrawColor(180, 185, 195);
-    pdf.setLineWidth(0.15);
-    pdf.rect(MARGIN, cursorY - swatch + 1, swatch, swatch, "FD");
-
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(8);
-    pdf.setTextColor(31, 41, 55);
-    pdf.text(item.color.code, MARGIN + 8, cursorY);
-
-    pdf.setFont("helvetica", "normal");
-    pdf.setTextColor(90, 100, 115);
-    pdf.text(item.color.hex, MARGIN + 22, cursorY);
-    pdf.text(
-      `x ${item.count}  (${(item.ratio * 100).toFixed(1)}%)`,
-      MARGIN + 48,
-      cursorY,
-    );
-
-    cursorY += rowHeight;
-  }
-
-  const pageCount = pdf.getNumberOfPages();
-  for (let page = 1; page <= pageCount; page += 1) {
-    pdf.setPage(page);
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(7);
-    pdf.setTextColor(140, 148, 160);
-    pdf.text(
-      `Page ${page} / ${pageCount}`,
-      PAGE_WIDTH - MARGIN,
-      PAGE_HEIGHT - MARGIN,
-      { align: "right" },
+  for (let pageIndex = 0; pageIndex < bomPageCount; pageIndex += 1) {
+    pdf.addPage();
+    drawBomPage(
+      pdf,
+      stats.items,
+      pageIndex,
+      bomPageCount,
+      options.brandName,
+      stats.total,
+      stats.uniqueColors,
+      pageIndex * bomRowsPerPage,
+      Math.min(stats.items.length, (pageIndex + 1) * bomRowsPerPage),
     );
   }
+
+  drawFooters(pdf);
 
   pdf.save(formatFilename(options.brandName, cols, rows));
 }

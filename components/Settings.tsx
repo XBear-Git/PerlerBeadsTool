@@ -86,7 +86,9 @@ export function Settings({
             <InfoIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
             <span>
               当前色卡共 {paletteColorCount} 色
-              {paletteVerified ? null : "（示例数据，待按官方色卡校对）"}
+              {paletteVerified
+                ? "（已校对）"
+                : "（常用色号，建议按官方色卡复核）"}
             </span>
           </div>
         </div>

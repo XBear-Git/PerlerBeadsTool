@@ -22,8 +22,10 @@
 | 需求拆解 | 解析 PRD，提取技术栈、文件结构、核心/进阶功能与交付清单 | 形成目录与实现优先级 |
 | 环境准备 | 检查 Node / npm / pnpm / git，安装 pnpm，初始化 Next.js 16 + TS + Tailwind + shadcn/ui | 依赖安装完成，构建/测试链路可运行 |
 | 脚手架 | 按 PRD 创建 app / components / lib / data / types / tests | 结构与文档一致 |
-| 算法补全 | 实现像素化、LAB + CIEDE2000、Floyd-Steinberg、BOM、Canvas 渲染、jsPDF | 14 个单元测试通过 |
+| 算法补全 | 实现像素化、LAB + CIEDE2000、Floyd-Steinberg、BOM、Canvas 渲染、jsPDF | 核心算法与单元测试完成 |
 | UI 联调 | 上传、参数、预览、画笔、导出、BOM 串联 | 浏览器实测通过（见下） |
+| 数据校验 | 检查用户替换的三份真实色卡 JSON，修正数据错误，接入导入校验 | 格式通过，42/41/57 色正常加载 |
+| PDF 分页 | A4 / 32×32 分页、行列坐标、页码、BOM 末页 | 96×72 图纸导出 10 页（9 图纸 + 1 清单） |
 | 调试与交付 | 构建、Lint、类型检查、真机验证、文档 | 构建/检查全部通过，文档持续补充 |
 
 **初始化阶段验证结果（2026-10-29）：**
@@ -31,6 +33,14 @@
 - `pnpm lint`、`pnpm typecheck`、`pnpm test`（3 个文件 / 14 个用例）、`pnpm build` 全部通过；
 - 浏览器实测：上传 480×360 测试图 → 48×36 网格 / 1728 颗 / 15 色；切换 Artkal 后 BOM 与图纸实时重算；开抖动后颜色数 15 → 23；画笔点选 P23 后点击画布，黑色 6 → 7、白色 220 → 219；PNG（约 244 KB）与 PDF（约 372 KB）成功下载；
 - 控制台无 error / warning。
+
+**色卡校验与 PDF 分页验证结果（2026-10-29 第二轮）：**
+
+- 三份 JSON 语法合法，色号唯一；Perler 42 色、Artkal 41 色、Hama 57 色；
+- 发现 Artkal S34 的 `rgb` 与 `hex` 不一致（`#B61927` 应为 `[182,25,39]`，原为 `[182,25,57]`），已修正；
+- 由于 JSON 使用 `brand`/`rgb` 结构，与旧 `BeadPalette` 不一致，已增加导入校验与归一化层，而不是改写用户数据；
+- 5 个测试文件 / 23 个用例通过；
+- 浏览器实测 96×72 图纸：生成 9 个图纸页 + 1 个材料清单页，共 10 页；PDF 内可检索到 `Part 1 / 9`、`columns A-AF`、`rows 1-32`、`Page 1 / 10` 与末页 `Bead list`；页面尺寸为 A4（595.28 × 841.89 pt）。
 
 ## 4. 关键 Prompt 记录（原文）
 
@@ -57,6 +67,30 @@
 - 为什么先做单页 PDF：多页排版是加分项，优先保证核心链路可交付；
 - 色卡数据先以 24 色示例占位，避免伪造官方色号，后续逐色校对。
 
+### 2026-10-29 · 色卡校验与 PDF 分页
+
+**输入（用户原文）：**
+
+> 我已经修改了Perler等三种品牌的常用色号json文件，填入了真实数据，你先检验格式是否正确。
+> 然后做pdf分页：
+> 实现按 A4 尺寸（210×297mm）自动分页，每页容纳固定格数（如 32×32）。
+> 添加页码、行列坐标（如 A1, B2...）。
+> 保留材料清单页作为最后一页。
+
+**AI 执行要点：**
+
+1. 逐字段校验三份 JSON：brand、verified、colors、code/name/hex/rgb、色号唯一性、hex 合法性、rgb 与 hex 一致性；
+2. 报告并修正 Artkal S34 的 rgb 错误；
+3. 发现 JSON 顶层结构（`brand`）与内部 `BeadPalette`（`id`/`name`/`description`）不一致，在 `data/beads/index.ts` 增加校验与归一化层，保留原始数据格式；
+4. 将 `exportPdf.ts` 重写为 A4 分页：32×32/页、Excel 风格列坐标 + 全局行号、`Page x / y`、BOM 末页；
+5. 新增 `exportPdf.test.ts` 与 `palettes.test.ts`，并用浏览器导出 96×72 图纸验证页数、页脚与坐标文案。
+
+**我的判断（待开发者确认/补充）：**
+
+- 分页尺寸选择 32×32：兼顾格子可读性和页数，48×48 会拆成 4 页；
+- 列坐标采用 A…Z、AA… 的全局命名，行号跨页连续，便于按坐标拼回整张图；
+- 色卡 `verified` 保持 `false`，UI 改为「常用色号，建议按官方色卡复核」，不擅自宣称已逐色校对。
+
 ## 5. 难点与 Prompt 调整
 
 > 按「现象 → 我的分析 → Prompt 如何调整 → 结果」记录，每个难点一行。
@@ -66,6 +100,9 @@
 | pnpm 安装 | `corepack enable` 报 `EPERM ... D:\nodeljs\yarn` | Node 安装在 D 盘，当前用户无权限写 shim 目录 | 改为 `npm install -g pnpm`（npm prefix 在用户目录） | pnpm 12.16.1 可用 |
 | 类型检查 | 首次 `tsc --noEmit` 报 `Cannot find name 'LayoutProps'` | Next 16 的 `LayoutProps` 由 `next typegen` 生成，新项目尚未生成 | 把脚本改为 `next typegen && tsc --noEmit` | 类型检查通过，且新克隆可直接运行 |
 | 下拉框显示 | Base UI Select 初始显示 `perler`，而不是 `Perler · 24 色` | `SelectValue` 默认展示原始 value，需要格式化函数 | 给 `SelectValue` 传入 children 渲染函数 | 品牌与网格下拉均显示可读文案 |
+| 色卡结构不一致 | 新 JSON 使用 `brand`、携带 `rgb`，应用读取 `palette.name` 时得到 undefined | 数据格式与内部 `BeadPalette` 解耦不足，直接 cast 会掩盖问题 | 增加 Raw 类型、校验与 normalize 层，不改写用户原始文件 | 三品牌正常加载，坏数据在导入时抛错 |
+| 色卡数据错误 | Artkal S34 `rgb: [182,25,57]` 与 `#B61927` 不一致 | hex 的蓝色通道是 `0x27=39`，rgb 写成了 57 | 按 hex 修正 rgb，并加入导入期一致性校验 | 校验通过，避免匹配时使用错误颜色 |
+| PDF 多页 | 原实现把整图缩到单页，48×48 以上不可用 | 需要固定格子尺寸并跨页保持坐标连续 | 抽出 `createPdfTiles` / `toColumnLabel`，先拆页再统一写页脚 | 96×72 输出 9 图纸页 + 1 清单页 |
 
 ## 6. 我的决策 vs AI 的执行
 
@@ -73,8 +110,8 @@
 | --- | --- | --- |
 | 技术栈 | 按 PRD 采用 Next.js + TS + Tailwind + shadcn/ui | 完成脚手架与依赖安装 |
 | 算法 | 颜色匹配必须使用 LAB + CIEDE2000 | 实现转换、色差、匹配与缓存，并加基准测试 |
-| 数据真实性 | 不伪造官方色卡，先标注示例数据 | 建立 3 份 24 色示例 JSON，`verified: false` |
-| 范围控制 | 先打通核心链路，多页 PDF 留到进阶 | 单页矢量 PDF + BOM 页 |
+| 数据真实性 | 不伪造官方色卡；先标注示例，后由用户提供真实常用色号 | 建立可校验的 JSON 导入层，发现并修正 rgb 不一致 |
+| 范围控制 | 先打通核心链路，再补 PDF 多页 | 单页 PDF → A4 32×32 自动分页 + 坐标 + 页码 + BOM 末页 |
 
 ## 7. 可复用 Prompt 模板
 

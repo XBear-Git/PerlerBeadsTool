@@ -16,7 +16,7 @@ export type Lab = readonly [number, number, number];
 export interface BeadColor {
   /** 品牌色号，例如 P01 */
   code: string;
-  /** 中文颜色名，便于材料清单阅读 */
+  /** 颜色名（中/英文均可），用于材料清单阅读 */
   name: string;
   /** sRGB 十六进制值，例如 #FFFFFF */
   hex: string;

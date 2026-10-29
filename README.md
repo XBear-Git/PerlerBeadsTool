@@ -13,12 +13,12 @@
 | 色盘匹配 | ✅ | sRGB → CIELAB + CIEDE2000，逐像素最近色 |
 | 图纸生成 | ✅ | 网格线、填色、格内色号，小格自动隐藏色号 |
 | PNG 导出 | ✅ | 独立离屏画布渲染，32 px/格 |
-| PDF 导出 | ✅ | jsPDF 矢量网格 + 材料清单页 |
+| PDF 导出 | ✅ | jsPDF 矢量网格，A4 自动分页 |
 | 品牌切换 | ✅ | Perler / Artkal / Hama，实时重算 |
 | 画布微调 | ✅ | 选择色卡颜色后点击格子改色，BOM 实时更新 |
 | 材料清单（BOM） | ✅ | 按色号聚合，降序展示数量与占比 |
 | Floyd-Steinberg 抖动 | ✅ | 可选开关；会增加用色数量 |
-| 多页图纸 | ⏳ | PDF 目前为整图缩放到单页，后续按 A4 分页 |
+| 多页图纸 | ✅ | 每页 32×32 格，带页码与全局行列坐标 |
 | 移动端适配 | ✅ | Tailwind 响应式，窄屏单列布局 |
 
 ## 技术栈
@@ -81,16 +81,18 @@ lib/
   exportPdf.ts             # PDF 导出封装
   utils.ts                 # shadcn className 工具
 data/beads/
-  perler.json              # Perler 色卡（示例数据，待校对）
-  artkal.json              # Artkal 色卡（示例数据，待校对）
-  hama.json                # Hama 色卡（示例数据，待校对）
-  index.ts                 # 色卡注册表
+  perler.json              # Perler 常用色卡（42 色）
+  artkal.json              # Artkal 常用色卡（41 色）
+  hama.json                # Hama 常用色卡（57 色）
+  index.ts                 # 色卡注册表 + 导入校验/归一化
 types/
   index.ts                 # 全局类型
 tests/
   colorMatch.test.ts       # 色差与匹配测试
   pixelate.test.ts         # 尺寸与降采样测试
   stats.test.ts            # BOM 统计测试
+  exportPdf.test.ts        # 分页与列坐标测试
+  palettes.test.ts         # 色卡格式与数量测试
 public/                    # 静态资源（当前为空，预留）
 README.md
 AI_REPORT.md               # AI 编程报告（持续补充）
@@ -114,18 +116,34 @@ AI_REPORT.md               # AI 编程报告（持续补充）
 
 Floyd-Steinberg 把量化误差按 7/16、3/16、5/16、1/16 扩散到右、左下、下、右下邻居。渐变更平滑，但会增加色号与材料成本，因此默认关闭。
 
+### PDF 分页
+
+- A4 纵向 210 × 297 mm，每页固定 32 × 32 格；超出的部分按「先左右、后上下」拆页。
+- 列坐标使用表格风格字母（A…Z、AA…AZ、BA…），行坐标使用全局数字（1…N），跨页后仍能定位到整张图的位置。
+- 每页页脚统一为 `Page x / y`，`y` 在全部页面生成后计算。
+- 材料清单固定排在图纸页之后；颜色较多时自动续页，仍位于整个 PDF 的最后。
+- 所有页面共用同一格子尺寸，打印后可等大拼接。
+
 ## 色卡数据说明
 
-`data/beads/*.json` 目前是**示例色卡**（每品牌 24 色），色号与 hex 尚未与官方色卡逐色校对，字段 `verified: false`。正式交付前应按品牌官方色卡替换，并在 UI 中去掉「示例数据」提示。
+`data/beads/*.json` 已替换为常用色号：Perler 42 色、Artkal 41 色、Hama 57 色。文件顶层使用 `brand` / `verified` / `colors`，每个颜色包含 `code`、`name`、`hex`，可选 `rgb`。
+
+导入时 `data/beads/index.ts` 会校验并归一化：
+
+- `brand` 非空、`colors` 非空；
+- 同一品牌内色号唯一；
+- `hex` 必须为 `#RRGGBB`；
+- 如果提供 `rgb`，三个通道必须与 `hex` 完全一致；
+- 校验失败会在构建/启动阶段直接抛错，避免坏数据静默进入匹配流程。
+
+当前 `verified` 仍为 `false`，界面显示「常用色号，建议按官方色卡复核」；完成逐色校对后可改为 `true`。
 
 ## 已知限制 / 后续计划
 
-- PDF 暂为单页缩放，48×48 以上打印格子偏小；计划按 A4 自动分页并加页码、行列坐标。
-- jsPDF 内置字体不含中文，PDF 内使用英文标签与色号；如需中文需嵌入 TTF。
-- 色卡仅 24 色，需补全官方全色系。
+- jsPDF 内置字体不含中文，PDF 内使用英文标签、坐标与色号；如需中文需嵌入 TTF。
+- 色卡是常用色号，并非品牌官方全色系。
 - 图像处理目前在主线程，160×160 以上网格可考虑迁移到 Web Worker。
 - 尚未实现图片裁剪、透明度处理（透明像素目前按黑色参与匹配）。
-
 ## 交付清单
 
 - [x] 完整可运行源码
