@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { SparklesIcon } from "lucide-react";
 
 import { BomList } from "@/components/BomList";
+import { CropperModal } from "@/components/CropperModal";
 import { ExportBar, type ExportFormat } from "@/components/ExportBar";
 import { Preview } from "@/components/Preview";
 import { Settings } from "@/components/Settings";
@@ -125,11 +126,11 @@ export default function HomePage() {
           <div className="min-w-0 space-y-4">
             <Uploader
               onFile={(file) => {
-                void project.loadFile(file);
+                void project.startCrop(file);
               }}
               fileName={project.sourceName}
               dimensions={project.sourceSize}
-              disabled={project.isProcessing}
+              disabled={project.isProcessing || project.isPreparingCrop}
               onReset={project.reset}
             />
 
@@ -164,7 +165,7 @@ export default function HomePage() {
             />
 
             <ExportBar
-              disabled={!grid}
+              disabled={!grid || project.isProcessing || project.isPreparingCrop}
               exporting={exporting}
               totalBeads={stats?.total ?? 0}
               uniqueColors={stats?.uniqueColors ?? 0}
@@ -188,6 +189,18 @@ export default function HomePage() {
           </aside>
         </div>
       </div>
+
+      {project.cropRequest ? (
+        <CropperModal
+          key={project.cropRequest.imageUrl}
+          imageSrc={project.cropRequest.imageUrl}
+          fileName={project.cropRequest.fileName}
+          imageWidth={project.cropRequest.width}
+          imageHeight={project.cropRequest.height}
+          onCancel={project.cancelCrop}
+          onConfirm={(result) => project.applyCrop(result.blob)}
+        />
+      ) : null}
     </main>
   );
 }

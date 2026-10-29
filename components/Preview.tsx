@@ -107,7 +107,10 @@ export function Preview({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="relative flex min-h-64 items-center justify-center overflow-auto rounded-xl border bg-muted/30 p-3">
+        <div
+          className="relative flex min-h-64 items-center justify-center overflow-auto rounded-xl border bg-muted/30 p-3"
+          aria-busy={isProcessing}
+        >
           {grid ? (
             <canvas
               ref={canvasRef}

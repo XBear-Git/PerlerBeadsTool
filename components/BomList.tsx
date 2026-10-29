@@ -1,6 +1,6 @@
 "use client";
 
-import { LayersIcon } from "lucide-react";
+import { InfoIcon, LayersIcon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -37,7 +37,27 @@ export function BomList({ stats, paletteName }: BomListProps) {
             : "生成图纸后自动统计各色拼豆用量。"}
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-3">
+        {stats && stats.transparent > 0 ? (
+          <div
+            className={
+              stats.transparentRatio >= 0.05
+                ? "flex items-start gap-2 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+                : "flex items-start gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+            }
+          >
+            <InfoIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+            <span>
+              透明像素 {stats.transparent} 格（
+              {(stats.transparentRatio * 100).toFixed(1)}%），已跳过颜色匹配，不计入
+              BOM
+              {stats.transparentRatio >= 0.05
+                ? "。透明区域较多，请确认裁剪范围是否符合预期。"
+                : "。"}
+            </span>
+          </div>
+        ) : null}
+
         {stats && stats.items.length > 0 ? (
           <div className="max-h-80 overflow-auto rounded-lg border">
             <Table>

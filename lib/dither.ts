@@ -9,6 +9,7 @@ import type { BeadCell, BeadGrid, PixelMatrix, Rgb } from "@/types";
  * 这样渐变区域会交替使用相邻色号，视觉上比直接量化更平滑。
  *
  * 复杂度：O(W·H·P)，与无抖动匹配同阶，只多了常数级的误差分发。
+ * 透明像素保持 null，不参与匹配，也不会接收/扩散误差。
  * 注意：抖动会提高色号数量，材料成本可能上升，因此作为可选开关。
  */
 
@@ -32,15 +33,22 @@ export function ditherToPalette(
 
   if (height === 0 || width === 0) return [];
 
-  // 复制成可写入的浮点缓冲，避免修改调用方数据
-  const buffer = pixels.map((row) => row.map(([r, g, b]) => [r, g, b]));
+  // 复制成可写入的浮点缓冲，避免修改调用方数据；null 表示透明
+  const buffer = pixels.map((row) =>
+    row.map((rgb) => (rgb ? [rgb[0], rgb[1], rgb[2]] : null)),
+  );
   const grid: BeadGrid = [];
 
   for (let y = 0; y < height; y += 1) {
-    const row: BeadCell[] = [];
+    const row: (BeadCell | null)[] = [];
 
     for (let x = 0; x < width; x += 1) {
       const current = buffer[y][x];
+      if (!current) {
+        row.push(null);
+        continue;
+      }
+
       const rgb: Rgb = [
         Math.round(clamp(current[0])),
         Math.round(clamp(current[1])),
@@ -61,6 +69,8 @@ export function ditherToPalette(
         if (nx < 0 || nx >= width || ny >= height) continue;
 
         const target = buffer[ny][nx];
+        if (!target) continue;
+
         target[0] += errorR * weight;
         target[1] += errorG * weight;
         target[2] += errorB * weight;

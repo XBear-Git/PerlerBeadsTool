@@ -3,16 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { getPalette } from "@/data/beads";
-import {
-  createPaletteMatcher,
-  hexToRgb,
-  matchPixelsToPalette,
-} from "@/lib/colorMatch";
-import { ditherToPalette } from "@/lib/dither";
+import { hexToRgb } from "@/lib/colorMatch";
+import { processImageInWorker, cancelMatchWorker } from "@/lib/matchClient";
 import {
   fitGridSize,
-  loadImageFile,
-  pixelateImage,
+  loadImageBlob,
+  loadImageUrl,
   validateImageFile,
   type LoadedImage,
 } from "@/lib/pixelate";
@@ -37,11 +33,19 @@ export const DEFAULT_SETTINGS: ProjectSettings = {
 /** 手动改色最多保留的撤销步数 */
 export const MAX_EDIT_HISTORY = 10;
 
+/** 等待用户在裁剪弹窗中确认的原始图片信息 */
+export interface CropRequest {
+  imageUrl: string;
+  fileName: string;
+  width: number;
+  height: number;
+}
+
 interface ManualEdit {
   row: number;
   col: number;
-  /** 改色前的格子，用于撤销 */
-  before: BeadCell;
+  /** 改色前的格子；null 表示该位置原本透明 */
+  before: BeadCell | null;
 }
 
 function gridsEqual(a: BeadGrid, b: BeadGrid | null): boolean {
@@ -53,6 +57,9 @@ function gridsEqual(a: BeadGrid, b: BeadGrid | null): boolean {
     for (let col = 0; col < a[row].length; col += 1) {
       const left = a[row][col];
       const right = b[row][col];
+
+      if (!left && !right) continue;
+      if (!left || !right) return false;
       if (
         left.color.code !== right.color.code ||
         left.color.hex !== right.color.hex
@@ -76,6 +83,8 @@ export interface UseBeadProjectResult {
   brushColor: BeadColor | null;
   error: string | null;
   isProcessing: boolean;
+  isPreparingCrop: boolean;
+  cropRequest: CropRequest | null;
   hasImage: boolean;
   /** 是否有尚未清除的手动修改 */
   isDirty: boolean;
@@ -84,7 +93,11 @@ export interface UseBeadProjectResult {
   canUndo: boolean;
   canClearEdits: boolean;
   updateSettings: (patch: Partial<ProjectSettings>) => void;
-  loadFile: (file: File) => Promise<void>;
+  /** 上传后进入裁剪阶段，不会立即覆盖当前图纸 */
+  startCrop: (file: File) => Promise<void>;
+  /** 应用裁剪后的 Blob，并触发像素化流程 */
+  applyCrop: (blob: Blob) => Promise<void>;
+  cancelCrop: () => void;
   reset: () => void;
   selectBrush: (color: BeadColor | null) => void;
   paintCell: (row: number, col: number) => void;
@@ -104,19 +117,31 @@ export function useBeadProject(): UseBeadProjectResult {
   const [brushColor, setBrushColor] = useState<BeadColor | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isPreparingCrop, setIsPreparingCrop] = useState(false);
+  const [cropRequest, setCropRequest] = useState<CropRequest | null>(null);
   /** 自动生成的原始图纸，用于「清空修改」 */
   const [baseGrid, setBaseGrid] = useState<BeadGrid | null>(null);
   const [editHistory, setEditHistory] = useState<ManualEdit[]>([]);
   const [isDirty, setIsDirty] = useState(false);
 
   const processTaskRef = useRef(0);
-  const loadTaskRef = useRef(0);
+  const cropTaskRef = useRef(0);
+  const cropUrlRef = useRef<string | null>(null);
+
+  const clearCropUrl = useCallback(() => {
+    if (cropUrlRef.current) {
+      URL.revokeObjectURL(cropUrlRef.current);
+      cropUrlRef.current = null;
+    }
+  }, []);
+
+  // 组件卸载或页面关闭时释放裁剪预览 URL
+  useEffect(() => () => clearCropUrl(), [clearCropUrl]);
 
   const palette = useMemo(
     () => getPalette(settings.brandId),
     [settings.brandId],
   );
-  const matcher = useMemo(() => createPaletteMatcher(palette), [palette]);
 
   const stats = useMemo(
     () => (grid ? computeStats(grid) : null),
@@ -128,7 +153,7 @@ export function useBeadProject(): UseBeadProjectResult {
     return { width: grid[0].length, height: grid.length };
   }, [grid]);
 
-  // 图片或参数变化时重算：像素化 → 匹配(可选抖动) → 图纸
+  // 图片或参数变化时重算：Worker 内完成像素化 → 匹配(可选抖动) → 图纸
   useEffect(() => {
     if (!source) {
       processTaskRef.current += 1;
@@ -137,71 +162,153 @@ export function useBeadProject(): UseBeadProjectResult {
 
     const taskId = processTaskRef.current + 1;
     processTaskRef.current = taskId;
+    const controller = new AbortController();
 
-    // 让浏览器先完成一次绘制，避免大图计算阻塞输入反馈
+    // 让浏览器先完成一次绘制，再进入 Worker，保证加载态能及时显示
     const timer = window.setTimeout(() => {
       setIsProcessing(true);
-      try {
-        const target = fitGridSize(source.width, source.height, settings.maxSide);
-        const pixels = pixelateImage(source.image, target);
-        const nextGrid = settings.dither
-          ? ditherToPalette(pixels, matcher)
-          : matchPixelsToPalette(pixels, matcher);
 
-        if (processTaskRef.current !== taskId) return;
+      const run = async () => {
+        try {
+          const target = fitGridSize(
+            source.width,
+            source.height,
+            settings.maxSide,
+          );
+          const nextGrid = await processImageInWorker({
+            image: source.image,
+            size: target,
+            palette,
+            dither: settings.dither,
+            signal: controller.signal,
+          });
 
-        setGrid(nextGrid);
-        setBaseGrid(nextGrid);
-        setEditHistory([]);
-        setIsDirty(false);
-        setBrushColor(null);
-        setError(null);
-      } catch (cause) {
-        if (processTaskRef.current !== taskId) return;
-        setError(
-          cause instanceof Error ? cause.message : "处理图片时发生未知错误。",
-        );
-      } finally {
-        if (processTaskRef.current === taskId) {
-          setIsProcessing(false);
+          if (processTaskRef.current !== taskId) return;
+
+          setGrid(nextGrid);
+          setBaseGrid(nextGrid);
+          setEditHistory([]);
+          setIsDirty(false);
+          setBrushColor(null);
+          setError(null);
+        } catch (cause) {
+          if (controller.signal.aborted) return;
+          if (processTaskRef.current !== taskId) return;
+          setError(
+            cause instanceof Error ? cause.message : "处理图片时发生未知错误。",
+          );
+        } finally {
+          if (processTaskRef.current === taskId) {
+            setIsProcessing(false);
+          }
         }
-      }
+      };
+
+      void run();
     }, 16);
 
-    return () => window.clearTimeout(timer);
-  }, [source, settings.maxSide, settings.dither, matcher]);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+      cancelMatchWorker();
+    };
+  }, [source, settings.maxSide, settings.dither, palette]);
 
-  const loadFile = useCallback(async (file: File) => {
-    const message = validateImageFile(file);
-    if (message) {
-      setError(message);
-      return;
-    }
+  const startCrop = useCallback(
+    async (file: File) => {
+      const message = validateImageFile(file);
+      if (message) {
+        setError(message);
+        return;
+      }
 
-    const taskId = loadTaskRef.current + 1;
-    loadTaskRef.current = taskId;
-    setError(null);
-    setIsProcessing(true);
+      const taskId = cropTaskRef.current + 1;
+      cropTaskRef.current = taskId;
+      setIsPreparingCrop(true);
+      setError(null);
+      clearCropUrl();
+      setCropRequest(null);
 
-    try {
-      const loaded = await loadImageFile(file);
-      if (loadTaskRef.current !== taskId) return;
+      const objectUrl = URL.createObjectURL(file);
 
-      setSource(loaded);
-      setSourceName(file.name);
-      setBrushColor(null);
-    } catch (cause) {
-      if (loadTaskRef.current !== taskId) return;
-      setError(
-        cause instanceof Error ? cause.message : "读取图片失败，请重试。",
-      );
-      setIsProcessing(false);
-    }
-  }, []);
+      try {
+        const loaded = await loadImageUrl(objectUrl);
+        if (cropTaskRef.current !== taskId) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+
+        cropUrlRef.current = objectUrl;
+        setCropRequest({
+          imageUrl: objectUrl,
+          fileName: file.name,
+          width: loaded.width,
+          height: loaded.height,
+        });
+      } catch (cause) {
+        URL.revokeObjectURL(objectUrl);
+        if (cropTaskRef.current !== taskId) return;
+        setError(
+          cause instanceof Error ? cause.message : "读取图片失败，请重试。",
+        );
+      } finally {
+        if (cropTaskRef.current === taskId) {
+          setIsPreparingCrop(false);
+        }
+      }
+    },
+    [clearCropUrl],
+  );
+
+  const applyCrop = useCallback(
+    async (blob: Blob) => {
+      const request = cropRequest;
+      if (!request) {
+        throw new Error("没有待应用的裁剪结果。");
+      }
+
+      const taskId = cropTaskRef.current + 1;
+      cropTaskRef.current = taskId;
+      setIsPreparingCrop(true);
+      setError(null);
+
+      try {
+        const loaded = await loadImageBlob(blob);
+        if (cropTaskRef.current !== taskId) return;
+
+        clearCropUrl();
+        setCropRequest(null);
+        setSource(loaded);
+        setSourceName(request.fileName);
+        setBrushColor(null);
+      } catch (cause) {
+        if (cropTaskRef.current !== taskId) return;
+        const message =
+          cause instanceof Error ? cause.message : "应用裁剪失败，请重试。";
+        setError(message);
+        throw cause instanceof Error ? cause : new Error(message);
+      } finally {
+        if (cropTaskRef.current === taskId) {
+          setIsPreparingCrop(false);
+        }
+      }
+    },
+    [clearCropUrl, cropRequest],
+  );
+
+  const cancelCrop = useCallback(() => {
+    cropTaskRef.current += 1;
+    clearCropUrl();
+    setCropRequest(null);
+    setIsPreparingCrop(false);
+  }, [clearCropUrl]);
 
   const reset = useCallback(() => {
-    loadTaskRef.current += 1;
+    cropTaskRef.current += 1;
     processTaskRef.current += 1;
+    clearCropUrl();
+    setCropRequest(null);
+    setIsPreparingCrop(false);
     setSource(null);
     setSourceName(null);
     setGrid(null);
@@ -211,7 +318,7 @@ export function useBeadProject(): UseBeadProjectResult {
     setBrushColor(null);
     setError(null);
     setIsProcessing(false);
-  }, []);
+  }, [clearCropUrl]);
 
   const updateSettings = useCallback((patch: Partial<ProjectSettings>) => {
     setSettings((previous) => ({ ...previous, ...patch }));
@@ -222,7 +329,7 @@ export function useBeadProject(): UseBeadProjectResult {
       if (!brushColor || !grid) return;
 
       const cell = grid[row]?.[col];
-      if (!cell || cell.color.code === brushColor.code) return;
+      if (cell && cell.color.code === brushColor.code) return;
 
       const next = grid.map((line) => [...line]);
       next[row][col] = { color: brushColor, rgb: hexToRgb(brushColor.hex) };
@@ -230,7 +337,7 @@ export function useBeadProject(): UseBeadProjectResult {
       setGrid(next);
       setEditHistory((previous) => [
         ...previous.slice(-(MAX_EDIT_HISTORY - 1)),
-        { row, col, before: cell },
+        { row, col, before: cell ?? null },
       ]);
       setIsDirty(true);
     },
@@ -269,13 +376,17 @@ export function useBeadProject(): UseBeadProjectResult {
     brushColor,
     error,
     isProcessing,
+    isPreparingCrop,
+    cropRequest,
     hasImage: source !== null,
     isDirty,
     undoCount: editHistory.length,
     canUndo: editHistory.length > 0,
     canClearEdits: isDirty,
     updateSettings,
-    loadFile,
+    startCrop,
+    applyCrop,
+    cancelCrop,
     reset,
     selectBrush: setBrushColor,
     paintCell,

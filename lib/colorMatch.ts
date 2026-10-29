@@ -207,13 +207,15 @@ export function createPaletteMatcher(palette: BeadPalette): PaletteMatcher {
   };
 }
 
-/** 无抖动匹配：逐像素找最近色 */
+/** 无抖动匹配：逐像素找最近色；透明像素保持 null */
 export function matchPixelsToPalette(
   pixels: PixelMatrix,
   matcher: PaletteMatcher,
 ): BeadGrid {
   return pixels.map((row) =>
-    row.map((rgb): BeadCell => {
+    row.map((rgb): BeadCell | null => {
+      if (!rgb) return null;
+
       const { color } = matcher.match(rgb);
       return { color, rgb: hexToRgb(color.hex) };
     }),

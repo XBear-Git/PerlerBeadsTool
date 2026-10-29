@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist } from "next/font/google";
 
 import "./globals.css";
+import "react-easy-crop/react-easy-crop.css";
 
 import { cn } from "@/lib/utils";
 

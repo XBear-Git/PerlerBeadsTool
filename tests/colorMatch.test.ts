@@ -4,10 +4,11 @@ import {
   createPaletteMatcher,
   deltaE2000,
   hexToRgb,
+  matchPixelsToPalette,
   rgbToHex,
 } from "@/lib/colorMatch";
 import { getPalette } from "@/data/beads";
-import type { Rgb } from "@/types";
+import type { PixelMatrix, Rgb } from "@/types";
 
 describe("颜色空间转换", () => {
   it("hex 与 rgb 可以互相转换", () => {
@@ -45,5 +46,19 @@ describe("色卡匹配", () => {
     const result = matcher.match([250, 250, 248] as Rgb);
     expect(palette.colors).toContain(result.color);
     expect(result.distance).toBeLessThan(3);
+  });
+
+  it("透明像素保持 null，不参与匹配", () => {
+    const pixels: PixelMatrix = [
+      [[255, 255, 255], null],
+      [null, [0, 0, 0]],
+    ];
+
+    const grid = matchPixelsToPalette(pixels, matcher);
+
+    expect(grid[0][0]?.color.code).toBe("P01");
+    expect(grid[0][1]).toBeNull();
+    expect(grid[1][0]).toBeNull();
+    expect(grid[1][1]?.color).toBeDefined();
   });
 });

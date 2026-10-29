@@ -32,8 +32,8 @@ export interface BeadPalette {
   colors: BeadColor[];
 }
 
-/** 像素矩阵：pixels[row][col] = [r, g, b] */
-export type PixelMatrix = Rgb[][];
+/** 像素矩阵：pixels[row][col] = [r, g, b]；null 表示透明像素 */
+export type PixelMatrix = (Rgb | null)[][];
 
 /** 图纸中的一格：记录匹配到的色卡颜色及其实际 RGB */
 export interface BeadCell {
@@ -41,8 +41,8 @@ export interface BeadCell {
   rgb: Rgb;
 }
 
-/** 图纸矩阵：grid[row][col] = BeadCell */
-export type BeadGrid = BeadCell[][];
+/** 图纸矩阵：null 表示透明位置，不参与匹配、渲染与 BOM 统计 */
+export type BeadGrid = (BeadCell | null)[][];
 
 /** 网格尺寸（列数 × 行数） */
 export interface GridSize {
@@ -71,7 +71,12 @@ export interface BomItem {
 
 /** 材料清单统计结果 */
 export interface PatternStats {
+  /** 非透明格子总数（即需要的拼豆数量） */
   total: number;
+  /** 透明格子数量，不参与 BOM */
+  transparent: number;
+  /** 透明格占全部格子的比例，0-1 */
+  transparentRatio: number;
   uniqueColors: number;
   items: BomItem[];
 }

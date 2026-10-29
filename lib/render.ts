@@ -2,7 +2,8 @@ import type { BeadGrid } from "@/types";
 
 /**
  * 图纸渲染模块。
- * 用 Canvas 2D 绘制：底色 → 每格填色 → 网格线 → 色号。
+ * 用 Canvas 2D 绘制：可选底色 → 每格填色 → 网格线 → 色号。
+ * 透明格（null）不填色，导出 PNG 时可保留透明通道。
  * 复杂度 O(W·H)；160×160 的网格约 2.5 万格，单帧绘制在桌面端通常 < 50ms。
  */
 
@@ -18,6 +19,7 @@ export interface RenderOptions {
   showCodes?: boolean;
   /** 高分屏渲染倍率，导出时保持 1 */
   pixelRatio?: number;
+  /** 可选底色；不传则保持透明背景 */
   background?: string;
 }
 
@@ -41,7 +43,7 @@ export function renderPattern(
   const showGrid = options.showGrid ?? true;
   const showCodes = options.showCodes ?? true;
   const pixelRatio = Math.max(1, options.pixelRatio ?? 1);
-  const background = options.background ?? "#ffffff";
+  const background = options.background;
 
   const rows = grid.length;
   const cols = grid[0]?.length ?? 0;
@@ -59,17 +61,21 @@ export function renderPattern(
 
   context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
   context.clearRect(0, 0, width, height);
-  context.fillStyle = background;
-  context.fillRect(0, 0, width, height);
+  if (background) {
+    context.fillStyle = background;
+    context.fillRect(0, 0, width, height);
+  }
 
   if (rows === 0 || cols === 0) {
     return { width, height };
   }
 
-  // 1. 填色
+  // 1. 填色（透明格留空，不绘制）
   for (let y = 0; y < rows; y += 1) {
     for (let x = 0; x < cols; x += 1) {
       const cell = grid[y][x];
+      if (!cell) continue;
+
       context.fillStyle = cell.color.hex;
       context.fillRect(
         padding + x * cellSize,
@@ -118,6 +124,8 @@ export function renderPattern(
     for (let y = 0; y < rows; y += 1) {
       for (let x = 0; x < cols; x += 1) {
         const cell = grid[y][x];
+        if (!cell) continue;
+
         context.fillStyle = readableTextColor(cell.rgb);
         context.fillText(
           cell.color.code,

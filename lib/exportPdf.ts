@@ -4,8 +4,9 @@ import {
   buildPatternFilename,
   DEFAULT_PATTERN_NAME,
 } from "@/lib/filename";
+import { PDF_FONT_FAMILY, registerPdfFont } from "@/lib/pdfFont";
 import { computeStats } from "@/lib/stats";
-import type { BeadGrid } from "@/types";
+import type { BeadCell, BeadGrid } from "@/types";
 
 /**
  * PDF 导出封装（A4 自动分页）。
@@ -100,6 +101,20 @@ export function createPdfTiles(cols: number, rows: number): PdfTile[] {
 const TITLE_MAX_WIDTH = PDF_PAGE_WIDTH - MARGIN * 2;
 const TITLE_MAX_HEIGHT = 6;
 
+/** 统一字体切换：注册成功时全部使用 Noto Sans SC，否则回退内置字体 */
+function setPdfFont(
+  pdf: JsPdfDocument,
+  hasCjkFont: boolean,
+  size: number,
+  bold = false,
+): void {
+  pdf.setFont(
+    hasCjkFont ? PDF_FONT_FAMILY : "helvetica",
+    hasCjkFont ? "normal" : bold ? "bold" : "normal",
+  );
+  pdf.setFontSize(size);
+}
+
 /**
  * 将中文/混合标题栅格化为高分辨率 PNG。
  * jsPDF 内置 Helvetica 不含中文字形，直接写文字会乱码；
@@ -145,10 +160,28 @@ function createTitleImage(text: string): {
 
 /**
  * 绘制页标题：
- * - 纯 ASCII 用 jsPDF 矢量文字，保持清晰且体积小；
- * - 含中文时转为图片嵌入，避免 Helvetica 缺字。
+ * - 注册中文字体后，所有标题都用 Noto Sans SC 矢量文字；
+ * - 字体加载失败时，ASCII 回退 Helvetica，中文回退 Canvas 位图。
  */
-function drawTitle(pdf: JsPdfDocument, title: string): void {
+function drawTitle(
+  pdf: JsPdfDocument,
+  title: string,
+  hasCjkFont: boolean,
+): void {
+  if (hasCjkFont) {
+    let fontSize = 13;
+    setPdfFont(pdf, true, fontSize, true);
+
+    while (pdf.getTextWidth(title) > TITLE_MAX_WIDTH && fontSize > 8) {
+      fontSize -= 0.5;
+      setPdfFont(pdf, true, fontSize, true);
+    }
+
+    pdf.setTextColor(17, 24, 39);
+    pdf.text(title, MARGIN, MARGIN + 5);
+    return;
+  }
+
   if (/^[\x20-\x7E]+$/.test(title)) {
     pdf.setFont("helvetica", "bold");
     let fontSize = 13;
@@ -176,7 +209,7 @@ function drawTitle(pdf: JsPdfDocument, title: string): void {
   pdf.addImage(image.dataUrl, "PNG", MARGIN, MARGIN - 0.8, width, height);
 }
 
-function readableTextColor(cell: BeadGrid[number][number]): [number, number, number] {
+function readableTextColor(cell: BeadCell): [number, number, number] {
   const [r, g, b] = cell.rgb;
   return 0.299 * r + 0.587 * g + 0.114 * b > 155
     ? [31, 41, 55]
@@ -195,6 +228,8 @@ function drawPatternPage(
   cols: number,
   rows: number,
   totalBeads: number,
+  transparentCells: number,
+  hasCjkFont: boolean,
   options: PdfExportOptions,
   cellSize: number,
   gridX: number,
@@ -202,26 +237,27 @@ function drawPatternPage(
 ): void {
   const patternName = options.patternName.trim() || DEFAULT_PATTERN_NAME;
 
-  drawTitle(pdf, `${patternName} - Part ${tile.index} / ${tileCount}`);
+  drawTitle(pdf, `${patternName} - Part ${tile.index} / ${tileCount}`, hasCjkFont);
 
   const firstColumn = toColumnLabel(tile.colStart);
   const lastColumn = toColumnLabel(tile.colStart + tile.cols - 1);
   const firstRow = tile.rowStart + 1;
   const lastRow = tile.rowStart + tile.rows;
 
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(7.5);
+  setPdfFont(pdf, hasCjkFont, 7.5);
   pdf.setTextColor(90, 100, 115);
-  pdf.text(
-    `${options.brandName} | ${cols} x ${rows} cells | columns ${firstColumn}-${lastColumn} | rows ${firstRow}-${lastRow} | ${totalBeads} beads`,
-    MARGIN,
-    MARGIN + 10,
-  );
+  const infoLine = hasCjkFont
+    ? `${options.brandName} | ${cols} × ${rows} 格 | 列 ${firstColumn}-${lastColumn} | 行 ${firstRow}-${lastRow} | ${totalBeads} 颗${transparentCells > 0 ? ` | ${transparentCells} 透明` : ""}`
+    : `${options.brandName} | ${cols} x ${rows} cells | columns ${firstColumn}-${lastColumn} | rows ${firstRow}-${lastRow} | ${totalBeads} beads${transparentCells > 0 ? ` | ${transparentCells} transparent` : ""}`;
 
-  // 1. 填色
+  pdf.text(infoLine, MARGIN, MARGIN + 10);
+
+  // 1. 填色（透明格留空）
   for (let localRow = 0; localRow < tile.rows; localRow += 1) {
     for (let localCol = 0; localCol < tile.cols; localCol += 1) {
       const cell = grid[tile.rowStart + localRow][tile.colStart + localCol];
+      if (!cell) continue;
+
       pdf.setFillColor(cell.rgb[0], cell.rgb[1], cell.rgb[2]);
       pdf.rect(
         gridX + localCol * cellSize,
@@ -257,12 +293,13 @@ function drawPatternPage(
 
   // 3. 格内色号
   if ((options.showCodes ?? true) && cellSize >= 3.2) {
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(Math.max(3.2, cellSize * 0.95));
+    setPdfFont(pdf, hasCjkFont, Math.max(3.2, cellSize * 0.95), true);
 
     for (let localRow = 0; localRow < tile.rows; localRow += 1) {
       for (let localCol = 0; localCol < tile.cols; localCol += 1) {
         const cell = grid[tile.rowStart + localRow][tile.colStart + localCol];
+        if (!cell) continue;
+
         const [r, g, b] = readableTextColor(cell);
         pdf.setTextColor(r, g, b);
         pdf.text(
@@ -276,8 +313,7 @@ function drawPatternPage(
   }
 
   // 4. 行列坐标（全局索引，便于跨页定位）
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(5.5);
+  setPdfFont(pdf, hasCjkFont, 5.5, true);
   pdf.setTextColor(71, 85, 105);
 
   for (let localCol = 0; localCol < tile.cols; localCol += 1) {
@@ -308,35 +344,45 @@ function drawBomPage(
   brandName: string,
   totalBeads: number,
   uniqueColors: number,
+  transparentCells: number,
+  hasCjkFont: boolean,
   startIndex: number,
   endIndex: number,
 ): void {
-  const title = pageIndex === 0 ? "Bead list" : "Bead list (continued)";
+  const title = hasCjkFont
+    ? pageIndex === 0
+      ? "材料清单"
+      : "材料清单（续）"
+    : pageIndex === 0
+      ? "Bead list"
+      : "Bead list (continued)";
 
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(14);
+  setPdfFont(pdf, hasCjkFont, 14, true);
   pdf.setTextColor(17, 24, 39);
   pdf.text(title, MARGIN, MARGIN + 5);
 
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(8);
+  setPdfFont(pdf, hasCjkFont, 8);
   pdf.setTextColor(90, 100, 115);
-  pdf.text(
+  const summary =
     pageIndex === 0
-      ? `${brandName} | ${uniqueColors} colors | ${totalBeads} beads total`
-      : `${brandName} | page ${pageIndex + 1} / ${pageCount}`,
-    MARGIN,
-    MARGIN + 10,
-  );
+      ? hasCjkFont
+        ? `${brandName} | ${uniqueColors} 色 | ${totalBeads} 颗${transparentCells > 0 ? ` | ${transparentCells} 透明` : ""}`
+        : `${brandName} | ${uniqueColors} colors | ${totalBeads} beads total${transparentCells > 0 ? ` | ${transparentCells} transparent` : ""}`
+      : hasCjkFont
+        ? `${brandName} | 第 ${pageIndex + 1} / ${pageCount} 页`
+        : `${brandName} | page ${pageIndex + 1} / ${pageCount}`;
+
+  pdf.text(summary, MARGIN, MARGIN + 10);
 
   // 表头
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(6.5);
+  setPdfFont(pdf, hasCjkFont, 6.5, true);
   pdf.setTextColor(120, 128, 140);
-  pdf.text("Code", MARGIN + 6, MARGIN + 16);
-  pdf.text("Name", MARGIN + 24, MARGIN + 16);
+  pdf.text(hasCjkFont ? "色号" : "Code", MARGIN + 6, MARGIN + 16);
+  pdf.text(hasCjkFont ? "名称" : "Name", MARGIN + 24, MARGIN + 16);
   pdf.text("Hex", MARGIN + 112, MARGIN + 16);
-  pdf.text("Qty", PDF_PAGE_WIDTH - MARGIN, MARGIN + 16, { align: "right" });
+  pdf.text(hasCjkFont ? "数量" : "Qty", PDF_PAGE_WIDTH - MARGIN, MARGIN + 16, {
+    align: "right",
+  });
 
   let cursorY = MARGIN + 21;
 
@@ -350,26 +396,22 @@ function drawBomPage(
     pdf.rect(MARGIN, cursorY - 3.4, 4.4, 4.4, "FD");
 
     // 色号
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(8);
+    setPdfFont(pdf, hasCjkFont, 8, true);
     pdf.setTextColor(31, 41, 55);
     pdf.text(item.color.code, MARGIN + 7, cursorY);
 
     // 色名
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(7.5);
+    setPdfFont(pdf, hasCjkFont, 7.5);
     pdf.setTextColor(71, 85, 105);
     pdf.text(item.color.name, MARGIN + 24, cursorY);
 
     // hex
-    pdf.setFont("courier", "normal");
-    pdf.setFontSize(7);
+    setPdfFont(pdf, hasCjkFont, 7);
     pdf.setTextColor(120, 128, 140);
     pdf.text(item.color.hex, MARGIN + 112, cursorY);
 
     // 数量与占比
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(7.5);
+    setPdfFont(pdf, hasCjkFont, 7.5);
     pdf.setTextColor(31, 41, 55);
     pdf.text(
       `${item.count}  (${(item.ratio * 100).toFixed(1)}%)`,
@@ -383,21 +425,20 @@ function drawBomPage(
 }
 
 /** 所有页面完成后统一写页脚，确保 Page x / y 中的 y 是最终总页数 */
-function drawFooters(pdf: JsPdfDocument): void {
+function drawFooters(pdf: JsPdfDocument, hasCjkFont: boolean): void {
   const pageCount = pdf.getNumberOfPages();
 
   for (let page = 1; page <= pageCount; page += 1) {
     pdf.setPage(page);
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(7);
+    setPdfFont(pdf, hasCjkFont, 7);
     pdf.setTextColor(140, 148, 160);
     pdf.text(
-      "Generated with Perler Beads Tool",
+      hasCjkFont ? "由拼豆图纸生成器导出" : "Generated with Perler Beads Tool",
       MARGIN,
       PDF_PAGE_HEIGHT - MARGIN,
     );
     pdf.text(
-      `Page ${page} / ${pageCount}`,
+      hasCjkFont ? `第 ${page} / ${pageCount} 页` : `Page ${page} / ${pageCount}`,
       PDF_PAGE_WIDTH - MARGIN,
       PDF_PAGE_HEIGHT - MARGIN,
       { align: "right" },
@@ -425,6 +466,8 @@ export async function exportGridToPdf(
     unit: "mm",
     format: "a4",
   });
+
+  const hasCjkFont = await registerPdfFont(pdf);
 
   pdf.setProperties({
     title: options.patternName.trim() || DEFAULT_PATTERN_NAME,
@@ -457,6 +500,8 @@ export async function exportGridToPdf(
       cols,
       rows,
       stats.total,
+      stats.transparent,
+      hasCjkFont,
       options,
       cellSize,
       gridX,
@@ -486,12 +531,14 @@ export async function exportGridToPdf(
       options.brandName,
       stats.total,
       stats.uniqueColors,
+      stats.transparent,
+      hasCjkFont,
       pageIndex * bomRowsPerPage,
       Math.min(stats.items.length, (pageIndex + 1) * bomRowsPerPage),
     );
   }
 
-  drawFooters(pdf);
+  drawFooters(pdf, hasCjkFont);
 
   pdf.save(
     buildPatternFilename({
