@@ -1,0 +1,99 @@
+# AI 编程报告
+
+> 状态：开发中，随项目推进实时补充。本文档中的对话均来自真实会话，不做事后美化。
+
+## 1. 项目与目标
+
+- 项目：拼豆（Perler Beads）网页生产工具
+- 目标：上传图片 → 像素化 → 匹配品牌色卡 → 生成带网格/色号的图纸 → PNG/PDF 导出，24 小时内交付可运行的全栈项目。
+- 交付：源码、README、本报告。
+
+## 2. 使用的 AI 工具
+
+| 工具 | 用途 | 备注 |
+| --- | --- | --- |
+| OpenCode + DeepSeek V4.1 Flash | 需求解析、脚手架、算法与 UI 生成、构建排错 | 本次初始化会话使用 |
+| （待补充） | （待补充） | 如后续使用 Cursor / Copilot / ChatGPT，请如实登记 |
+
+## 3. 工作流复盘
+
+| 阶段 | 实际动作 | 结果 |
+| --- | --- | --- |
+| 需求拆解 | 解析 PRD，提取技术栈、文件结构、核心/进阶功能与交付清单 | 形成目录与实现优先级 |
+| 环境准备 | 检查 Node / npm / pnpm / git，安装 pnpm，初始化 Next.js 16 + TS + Tailwind + shadcn/ui | 依赖安装完成，构建/测试链路可运行 |
+| 脚手架 | 按 PRD 创建 app / components / lib / data / types / tests | 结构与文档一致 |
+| 算法补全 | 实现像素化、LAB + CIEDE2000、Floyd-Steinberg、BOM、Canvas 渲染、jsPDF | 14 个单元测试通过 |
+| UI 联调 | 上传、参数、预览、画笔、导出、BOM 串联 | 浏览器实测通过（见下） |
+| 调试与交付 | 构建、Lint、类型检查、真机验证、文档 | 构建/检查全部通过，文档持续补充 |
+
+**初始化阶段验证结果（2026-10-29）：**
+
+- `pnpm lint`、`pnpm typecheck`、`pnpm test`（3 个文件 / 14 个用例）、`pnpm build` 全部通过；
+- 浏览器实测：上传 480×360 测试图 → 48×36 网格 / 1728 颗 / 15 色；切换 Artkal 后 BOM 与图纸实时重算；开抖动后颜色数 15 → 23；画笔点选 P23 后点击画布，黑色 6 → 7、白色 220 → 219；PNG（约 244 KB）与 PDF（约 372 KB）成功下载；
+- 控制台无 error / warning。
+
+## 4. 关键 Prompt 记录（原文）
+
+### 2026-10-29 · 初始化
+
+**输入（用户原文）：**
+
+> 阅读需求文档，先依据需求文档帮我创建项目的文件结构并进行必要的开发环境检查与配置
+
+**附加上下文：** `拼豆网页生产工具_AI需求文档.docx`
+
+**AI 执行要点：**
+
+1. 解析 docx，提取技术栈、目录结构、功能清单与 Prompt 约束；
+2. 检查 Node v24.15.0、npm 11.12.1、git 2.51.1，发现 pnpm 缺失；
+3. 通过 `npm install -g pnpm` 安装 pnpm 12.16.1（corepack 因无权限写入 Node 安装目录失败）；
+4. 使用 `create-next-app` 初始化 Next.js 16.4.3（App Router、TS、Tailwind 4），初始化 shadcn/ui；
+5. 按 PRD 建立目录、类型、示例色卡、核心算法、UI 组件、测试与文档；
+6. 运行 lint / typecheck / test / build 验证。
+
+**我的判断（待开发者确认/补充）：**
+
+- 为什么选 Next.js 16 + Tailwind 4：与 PRD 一致，App Router 便于后续加边缘函数；
+- 为什么先做单页 PDF：多页排版是加分项，优先保证核心链路可交付；
+- 色卡数据先以 24 色示例占位，避免伪造官方色号，后续逐色校对。
+
+## 5. 难点与 Prompt 调整
+
+> 按「现象 → 我的分析 → Prompt 如何调整 → 结果」记录，每个难点一行。
+
+| 难点 | 现象 | 我的分析 | Prompt 调整 | 结果 |
+| --- | --- | --- | --- | --- |
+| pnpm 安装 | `corepack enable` 报 `EPERM ... D:\nodeljs\yarn` | Node 安装在 D 盘，当前用户无权限写 shim 目录 | 改为 `npm install -g pnpm`（npm prefix 在用户目录） | pnpm 12.16.1 可用 |
+| 类型检查 | 首次 `tsc --noEmit` 报 `Cannot find name 'LayoutProps'` | Next 16 的 `LayoutProps` 由 `next typegen` 生成，新项目尚未生成 | 把脚本改为 `next typegen && tsc --noEmit` | 类型检查通过，且新克隆可直接运行 |
+| 下拉框显示 | Base UI Select 初始显示 `perler`，而不是 `Perler · 24 色` | `SelectValue` 默认展示原始 value，需要格式化函数 | 给 `SelectValue` 传入 children 渲染函数 | 品牌与网格下拉均显示可读文案 |
+
+## 6. 我的决策 vs AI 的执行
+
+| 决策点 | 我的决策 | AI 执行 |
+| --- | --- | --- |
+| 技术栈 | 按 PRD 采用 Next.js + TS + Tailwind + shadcn/ui | 完成脚手架与依赖安装 |
+| 算法 | 颜色匹配必须使用 LAB + CIEDE2000 | 实现转换、色差、匹配与缓存，并加基准测试 |
+| 数据真实性 | 不伪造官方色卡，先标注示例数据 | 建立 3 份 24 色示例 JSON，`verified: false` |
+| 范围控制 | 先打通核心链路，多页 PDF 留到进阶 | 单页矢量 PDF + BOM 页 |
+
+## 7. 可复用 Prompt 模板
+
+```text
+你是资深前端/图形学工程师。请只修改 <文件路径>，遵守：
+1. TypeScript 严格模式，中文注释、英文标识符；
+2. 不引入无关依赖，不臆造 API；
+3. 说明该模块职责、调用关系与时间复杂度；
+4. 给出 2-3 个边界情况（空图、超大图、非法输入）及处理方式；
+5. 修改后运行 pnpm typecheck / pnpm lint / pnpm test。
+
+需求：<具体模块需求>
+现有接口：<粘贴相关类型与函数签名>
+验收标准：<可验证的行为>
+```
+
+## 8. 后续待补
+
+- [ ] 补全各阶段真实 Prompt 原文
+- [ ] 记录至少 3 个「现象 → 分析 → Prompt 调整 → 结果」闭环
+- [ ] 补充浏览器实测截图与性能数据
+- [ ] 导出 PDF 供最终报告使用

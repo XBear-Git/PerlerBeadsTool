@@ -1,0 +1,32 @@
+{
+  "id": "artkal",
+  "name": "Artkal",
+  "description": "示例色卡（24 色，S 系列）。上线前请按官方色卡逐色校对 hex 与色号。",
+  "verified": false,
+  "colors": [
+    { "code": "S01", "name": "白色", "hex": "#FFFFFF" },
+    { "code": "S02", "name": "奶油色", "hex": "#FFF2CC" },
+    { "code": "S03", "name": "黄色", "hex": "#FFD400" },
+    { "code": "S04", "name": "橘色", "hex": "#FF7F00" },
+    { "code": "S05", "name": "红色", "hex": "#D71920" },
+    { "code": "S06", "name": "深红", "hex": "#A6192E" },
+    { "code": "S07", "name": "粉色", "hex": "#F28DB2" },
+    { "code": "S08", "name": "玫红", "hex": "#E4007C" },
+    { "code": "S09", "name": "丁香紫", "hex": "#B39DDB" },
+    { "code": "S10", "name": "紫色", "hex": "#5E35B1" },
+    { "code": "S11", "name": "天蓝", "hex": "#81D4FA" },
+    { "code": "S12", "name": "蓝色", "hex": "#1565C0" },
+    { "code": "S13", "name": "海军蓝", "hex": "#1A237E" },
+    { "code": "S14", "name": "蓝绿", "hex": "#00897B" },
+    { "code": "S15", "name": "森林绿", "hex": "#2E7D32" },
+    { "code": "S16", "name": "绿色", "hex": "#66BB6A" },
+    { "code": "S17", "name": "薄荷绿", "hex": "#A5D6A7" },
+    { "code": "S18", "name": "沙色", "hex": "#D7B98E" },
+    { "code": "S19", "name": "棕色", "hex": "#795548" },
+    { "code": "S20", "name": "深棕", "hex": "#4E342E" },
+    { "code": "S21", "name": "浅灰", "hex": "#BDBDBD" },
+    { "code": "S22", "name": "灰色", "hex": "#757575" },
+    { "code": "S23", "name": "炭灰", "hex": "#424242" },
+    { "code": "S24", "name": "黑色", "hex": "#000000" }
+  ]
+}

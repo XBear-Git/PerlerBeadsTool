@@ -1,0 +1,32 @@
+{
+  "id": "perler",
+  "name": "Perler",
+  "description": "示例色卡（24 色）。上线前请按官方色卡逐色校对 hex 与色号。",
+  "verified": false,
+  "colors": [
+    { "code": "P01", "name": "白色", "hex": "#FFFFFF" },
+    { "code": "P02", "name": "奶油色", "hex": "#FFF3D6" },
+    { "code": "P03", "name": "黄色", "hex": "#FFD400" },
+    { "code": "P04", "name": "橙色", "hex": "#FF7A00" },
+    { "code": "P05", "name": "红色", "hex": "#E32636" },
+    { "code": "P06", "name": "樱桃红", "hex": "#B5121B" },
+    { "code": "P07", "name": "粉色", "hex": "#F7A8C4" },
+    { "code": "P08", "name": "洋红", "hex": "#E6007E" },
+    { "code": "P09", "name": "紫色", "hex": "#6A2C91" },
+    { "code": "P10", "name": "薰衣草紫", "hex": "#B9A0D6" },
+    { "code": "P11", "name": "浅蓝", "hex": "#7EC8E3" },
+    { "code": "P12", "name": "蓝色", "hex": "#0057B8" },
+    { "code": "P13", "name": "藏青", "hex": "#1E2A5A" },
+    { "code": "P14", "name": "湖绿", "hex": "#00A6A0" },
+    { "code": "P15", "name": "墨绿", "hex": "#1E6B3A" },
+    { "code": "P16", "name": "绿色", "hex": "#3CB44B" },
+    { "code": "P17", "name": "青柠", "hex": "#A6CE39" },
+    { "code": "P18", "name": "浅绿", "hex": "#C8E6A0" },
+    { "code": "P19", "name": "棕色", "hex": "#6B4226" },
+    { "code": "P20", "name": "浅棕", "hex": "#C8A165" },
+    { "code": "P21", "name": "浅灰", "hex": "#C4C4C4" },
+    { "code": "P22", "name": "深灰", "hex": "#6E6E6E" },
+    { "code": "P23", "name": "黑色", "hex": "#101010" },
+    { "code": "P24", "name": "蜜桃色", "hex": "#FFCBA4" }
+  ]
+}
