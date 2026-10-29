@@ -1,8 +1,5 @@
 "use client";
 
-import { InfoIcon } from "lucide-react";
-
-import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -27,8 +24,6 @@ const GRID_OPTIONS = [32, 48, 64, 96, 128] as const;
 export interface SettingsProps {
   settings: ProjectSettings;
   gridSize: GridSize | null;
-  paletteColorCount: number;
-  paletteVerified: boolean;
   disabled?: boolean;
   onChange: (patch: Partial<ProjectSettings>) => void;
 }
@@ -37,8 +32,6 @@ export interface SettingsProps {
 export function Settings({
   settings,
   gridSize,
-  paletteColorCount,
-  paletteVerified,
   disabled = false,
   onChange,
 }: SettingsProps) {
@@ -82,15 +75,6 @@ export function Settings({
               ))}
             </SelectContent>
           </Select>
-          <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
-            <InfoIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-            <span>
-              当前色卡共 {paletteColorCount} 色
-              {paletteVerified
-                ? "（已校对）"
-                : "（常用色号，建议按官方色卡复核）"}
-            </span>
-          </div>
         </div>
 
         <div className="space-y-2">
@@ -154,11 +138,6 @@ export function Settings({
               disabled={disabled}
             />
           </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 border-t pt-4 text-xs text-muted-foreground">
-          <Badge variant="outline">LAB + CIEDE2000</Badge>
-          <Badge variant="outline">Canvas 像素化</Badge>
         </div>
       </CardContent>
     </Card>

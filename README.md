@@ -59,6 +59,12 @@ pnpm test         # Vitest（一次性）
 pnpm test:watch   # Vitest watch
 ```
 
+### 开发地址与按钮无响应
+
+Next.js 16 开发服务器默认只信任 `localhost`。如果从终端点击 `127.0.0.1` 或局域网 IP 的链接打开页面，HMR 请求会被判定为跨域并阻断，表现为页面能显示但按钮全部无响应。
+
+`next.config.ts` 已自动收集 `localhost`、`127.0.0.1`、本机 hostname 和本机 IPv4 地址并写入 `allowedDevOrigins`。切换网络后重启 `pnpm dev` 即可重新收集；生产模式 `pnpm start` 不受此限制。
+
 本项目不需要任何环境变量。
 
 ## 目录结构

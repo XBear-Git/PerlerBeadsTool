@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { buildPatternFilename } from "@/lib/filename";
 
 export type ExportFormat = "png" | "pdf";
 
@@ -21,9 +20,6 @@ export interface ExportBarProps {
   exporting: ExportFormat | null;
   totalBeads: number;
   uniqueColors: number;
-  brandName: string;
-  cols: number;
-  rows: number;
   patternName: string;
   onPatternNameChange: (value: string) => void;
   onExportPng: () => void;
@@ -36,35 +32,12 @@ export function ExportBar({
   exporting,
   totalBeads,
   uniqueColors,
-  brandName,
-  cols,
-  rows,
   patternName,
   onPatternNameChange,
   onExportPng,
   onExportPdf,
 }: ExportBarProps) {
   const busy = exporting !== null;
-  const pngFilename =
-    cols > 0 && rows > 0
-      ? buildPatternFilename({
-          patternName,
-          brandName,
-          cols,
-          rows,
-          extension: "png",
-        })
-      : null;
-  const pdfFilename =
-    cols > 0 && rows > 0
-      ? buildPatternFilename({
-          patternName,
-          brandName,
-          cols,
-          rows,
-          extension: "pdf",
-        })
-      : null;
 
   return (
     <Card>
@@ -84,16 +57,6 @@ export function ExportBar({
             placeholder="例如：暗夜魔女"
             onChange={(event) => onPatternNameChange(event.target.value)}
           />
-          <p className="text-xs text-muted-foreground">
-            显示在 PDF 页眉，并用于 PNG / PDF 文件名。
-          </p>
-          {pngFilename && pdfFilename ? (
-            <p className="break-all text-xs text-muted-foreground">
-              文件名：{pngFilename}
-              <br />
-              {pdfFilename}
-            </p>
-          ) : null}
         </div>
 
         <div className="grid gap-2 sm:grid-cols-2">

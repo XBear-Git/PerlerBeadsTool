@@ -11,7 +11,7 @@ import { Settings } from "@/components/Settings";
 import { Uploader } from "@/components/Uploader";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { DEFAULT_SETTINGS, useBeadProject } from "@/hooks/useBeadProject";
+import { useBeadProject } from "@/hooks/useBeadProject";
 import { exportGridToPdf } from "@/lib/exportPdf";
 import {
   buildPatternFilename,
@@ -109,7 +109,6 @@ export default function HomePage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Badge variant="secondary">纯前端处理</Badge>
             <Badge variant="outline">LAB + CIEDE2000</Badge>
             <Badge variant="outline">PNG / PDF 导出</Badge>
           </div>
@@ -158,8 +157,6 @@ export default function HomePage() {
             <Settings
               settings={settings}
               gridSize={project.gridSize}
-              paletteColorCount={palette.colors.length}
-              paletteVerified={palette.verified}
               disabled={project.isProcessing}
               onChange={project.updateSettings}
             />
@@ -169,9 +166,6 @@ export default function HomePage() {
               exporting={exporting}
               totalBeads={stats?.total ?? 0}
               uniqueColors={stats?.uniqueColors ?? 0}
-              brandName={palette.name}
-              cols={cols}
-              rows={rows}
               patternName={patternName}
               onPatternNameChange={setPatternName}
               onExportPng={() => {
@@ -182,10 +176,6 @@ export default function HomePage() {
               }}
             />
 
-            <p className="px-1 text-xs leading-relaxed text-muted-foreground">
-              默认网格最长边 {DEFAULT_SETTINGS.maxSide} 格。所有图片只在本地浏览器处理，
-              不会上传到服务器。
-            </p>
           </aside>
         </div>
       </div>
